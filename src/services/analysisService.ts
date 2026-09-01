@@ -32,9 +32,15 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
   const category: ConflictCategory = input.category || detectCategoryFromText(text);
   const emotion: EmotionType = input.emotion || detectEmotionFromText(text);
 
+  let endpoint = '/api/analyze';
+  const metaEnv = (import.meta as any)?.env;
+  if (metaEnv?.VITE_WORKER_API_URL) {
+    endpoint = metaEnv.VITE_WORKER_API_URL;
+  }
+
   let response: Response;
   try {
-    response = await fetch('/api/analyze', {
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
