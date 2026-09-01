@@ -101,7 +101,7 @@ export const EndingView: React.FC<EndingViewProps> = ({ onStartNew, onOpenAbout,
           onClick={onOpenAbout}
           className="hover:text-[#7E57C2] transition-colors cursor-pointer"
         >
-          درباره فلسفه آرومش کن
+          درباره فلسفه آروم شو
         </button>
       </motion.div>
     </div>

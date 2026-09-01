@@ -115,7 +115,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
-          title: 'تحلیل آرام دعوا در آرومش کن',
+          title: 'تحلیل آرام دعوا در آروم شو',
           text: shareText,
           url: inviteLink,
         });

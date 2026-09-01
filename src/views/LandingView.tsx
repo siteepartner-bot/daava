@@ -64,7 +64,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
           transition={{ duration: 0.4, delay: 0.1 }}
           className="text-base sm:text-lg text-[#64748B] max-w-2xl mx-auto leading-relaxed mb-8"
         >
-          «آرومش کن» کمک می‌کنه قبل از اینکه بحث بزرگتر بشه، بفهمید واقعاً چه چیزی باعث
+          «آروم شو» کمک می‌کنه قبل از اینکه بحث بزرگتر بشه، بفهمید واقعاً چه چیزی باعث
           ناراحتی شما و طرف مقابل شده.
         </motion.p>
 
@@ -118,7 +118,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         >
           <div className="text-center mb-3">
             <span className="text-xs font-semibold text-purple-700 uppercase tracking-wide">
-              پیش‌نمایش زنده از عملکرد آرومش کن
+              پیش‌نمایش زنده از عملکرد آروم شو
             </span>
           </div>
 

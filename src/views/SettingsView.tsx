@@ -290,7 +290,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             onClick={() => onOpenAbout('about-us')}
             className="w-full py-2 flex items-center justify-between text-xs md:text-sm font-semibold text-[#2D2A32] hover:text-[#7E57C2] text-right cursor-pointer"
           >
-            <span>درباره تیم و ماموریت آرومش کن</span>
+            <span>درباره تیم و ماموریت آروم شو</span>
             <Heart className="w-4 h-4 text-slate-400" />
           </button>
           <button

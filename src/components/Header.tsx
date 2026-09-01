@@ -33,7 +33,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
             <span className="text-sm">🤍</span>
           </div>
           <span className="text-lg md:text-xl font-bold tracking-tight text-[#2D2A32] group-hover:text-[#7E57C2] transition-colors">
-            آرومش کن
+            آروم شو
           </span>
         </button>
 

@@ -47,7 +47,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
           <div className="flex items-center justify-between pb-4 mb-4 border-b border-purple-100/70">
             <div className="flex items-center gap-2">
               <span className="text-xl">🤍</span>
-              <h3 className="text-lg font-bold text-[#2D2A32]">آرومش کن</h3>
+              <h3 className="text-lg font-bold text-[#2D2A32]">آروم شو</h3>
             </div>
             <button
               onClick={onClose}
@@ -138,7 +138,7 @@ export const AboutModal: React.FC<AboutModalProps> = ({
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-purple-50 to-pink-50 border border-purple-100">
                   <h4 className="font-bold text-purple-950 text-sm mb-2 flex items-center gap-2">
                     <Heart className="w-4 h-4 text-pink-500 fill-pink-500" />
-                    <span>فلسفه «آرومش کن»</span>
+                    <span>فلسفه «آروم شو»</span>
                   </h4>
                   <p className="text-slate-700 leading-relaxed">
                     دعواها معمولاً به خاطر نبود عشق نیست، بلکه ناشی از نشنیده شدن نیازها و

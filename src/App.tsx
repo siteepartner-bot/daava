@@ -724,7 +724,7 @@ export default function App() {
           <div className="flex items-start justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="text-xl">✨</span>
-              <p className="text-sm font-semibold">نسخه جدید آرومش کن آماده‌ست</p>
+              <p className="text-sm font-semibold">نسخه جدید آروم شو آماده‌ست</p>
             </div>
           </div>
           <div className="flex items-center gap-2 justify-end">
@@ -751,7 +751,7 @@ export default function App() {
               🤍
             </div>
             <div>
-              <h4 className="text-sm font-bold text-gray-900">آرومش کن رو نصب کن</h4>
+              <h4 className="text-sm font-bold text-gray-900">آروم شو رو نصب کن</h4>
               <p className="text-xs text-gray-500 mt-0.5">برای دسترسی سریع‌تر و بدون مرورگر، برنامه رو روی گوشیت نصب کن.</p>
             </div>
           </div>
@@ -779,7 +779,7 @@ export default function App() {
               📱
             </div>
             <div className="flex-1">
-              <h4 className="text-sm font-bold text-gray-900">نصب آرومش کن روی آیفون</h4>
+              <h4 className="text-sm font-bold text-gray-900">نصب آروم شو روی آیفون</h4>
               <div className="text-xs text-gray-600 mt-1.5 space-y-1">
                 <p className="flex items-center gap-1">۱. در پایین مرورگر دکمه اشتراک‌گذاری <span className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-bold text-gray-700">Share 📤</span> را بزنید.</p>
                 <p className="flex items-center gap-1">۲. گزینه <span className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-bold text-gray-700">Add to Home Screen ➕</span> را انتخاب کنید.</p>
