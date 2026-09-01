@@ -2,6 +2,70 @@ import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
 
 const SESSION_STORAGE_KEY = 'aramkon_active_couple_session';
 
+function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
+  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
+  let savedWorkerUrl = '';
+  if (typeof window !== 'undefined') {
+    savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
+  }
+
+  const metaEnv = (import.meta as any)?.env;
+  const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
+
+  let primaryEndpoint = route;
+  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
+
+  if (configuredWorker) {
+    const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
+    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
+      ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
+      : `${cleanUrl}${route}`;
+    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+  } else if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('workers.dev') ||
+      window.location.hostname.includes('pages.dev'))
+  ) {
+    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+    fallbackEndpoint = route;
+  }
+
+  return { primary: primaryEndpoint, fallback: fallbackEndpoint };
+}
+
+async function fetchWithFallback(
+  route: string,
+  options: RequestInit
+): Promise<Response> {
+  const { primary, fallback } = getApiEndpoints(route);
+  let response: Response | null = null;
+  let lastError: any = null;
+
+  try {
+    response = await fetch(primary, options);
+  } catch (err) {
+    lastError = err;
+  }
+
+  if ((!response || !response.ok) && fallback && fallback !== primary) {
+    try {
+      const fallbackUrl = fallback.startsWith('http') ? fallback : fallback;
+      const fbResponse = await fetch(fallbackUrl, options);
+      if (fbResponse.ok || !response) {
+        return fbResponse;
+      }
+    } catch (fbErr) {
+      console.warn('Fallback couple API fetch failed:', fbErr);
+    }
+  }
+
+  if (!response) {
+    throw lastError || new Error('خطا در برقراری ارتباط با سرور.');
+  }
+
+  return response;
+}
+
 /**
  * Persist active session auth tokens locally for seamless page refresh
  */
@@ -45,7 +109,7 @@ export async function createCoupleSession(params: {
   token: string;
   role: 'participantA';
 }> {
-  const response = await fetch('/api/couple/create', {
+  const response = await fetchWithFallback('/api/couple/create', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -89,7 +153,7 @@ export async function joinCoupleSession(params: {
   token: string;
   role: 'participantA' | 'participantB';
 }> {
-  const response = await fetch('/api/couple/join', {
+  const response = await fetchWithFallback('/api/couple/join', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -135,7 +199,7 @@ export async function getCoupleSessionStatus(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`/api/couple/${encodeURIComponent(sessionIdOrCode)}`, {
+  const response = await fetchWithFallback(`/api/couple/${encodeURIComponent(sessionIdOrCode)}`, {
     method: 'GET',
     headers,
   });
@@ -169,7 +233,7 @@ export async function submitCoupleStory(params: {
   emotion?: string | null;
   gender?: string | null;
 }): Promise<CoupleSessionPublicState> {
-  const response = await fetch(`/api/couple/${encodeURIComponent(params.sessionIdOrCode)}/submit`, {
+  const response = await fetchWithFallback(`/api/couple/${encodeURIComponent(params.sessionIdOrCode)}/submit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -201,7 +265,7 @@ export async function submitCoupleStory(params: {
  */
 export async function leaveCoupleSession(sessionIdOrCode: string): Promise<void> {
   try {
-    await fetch(`/api/couple/${encodeURIComponent(sessionIdOrCode)}/leave`, {
+    await fetchWithFallback(`/api/couple/${encodeURIComponent(sessionIdOrCode)}/leave`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

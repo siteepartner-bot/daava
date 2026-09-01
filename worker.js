@@ -30,6 +30,80 @@ function generateJoinCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
+async function getSessionFromStore(idOrCode, env) {
+  const lookupKey = (idOrCode || '').trim().toUpperCase();
+  let sessionId = workerJoinCodes.get(lookupKey) || idOrCode.trim();
+
+  // Try in-memory
+  let session = workerCoupleSessions.get(sessionId);
+  if (session) return session;
+
+  // Try Cloudflare KV if bound
+  const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
+  if (kv) {
+    try {
+      if (lookupKey.length === 6) {
+        const resolvedId = await kv.get('code:' + lookupKey);
+        if (resolvedId) sessionId = resolvedId;
+      }
+      const raw = await kv.get('session:' + sessionId);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        workerCoupleSessions.set(parsed.id, parsed);
+        workerJoinCodes.set(parsed.joinCode.toUpperCase(), parsed.id);
+        return parsed;
+      }
+    } catch (err) {
+      console.warn('KV read error:', err);
+    }
+  }
+
+  // Linear search fallback in memory
+  for (const s of workerCoupleSessions.values()) {
+    if (s.joinCode.toUpperCase() === lookupKey || s.id === idOrCode) {
+      return s;
+    }
+  }
+
+  return null;
+}
+
+async function saveSessionToStore(session, env) {
+  workerCoupleSessions.set(session.id, session);
+  workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
+
+  const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
+  if (kv) {
+    try {
+      const ttl = 86400; // 24 hours
+      await Promise.all([
+        kv.put('session:' + session.id, JSON.stringify(session), { expirationTtl: ttl }),
+        kv.put('code:' + session.joinCode.toUpperCase(), session.id, { expirationTtl: ttl }),
+      ]);
+    } catch (err) {
+      console.warn('KV save error:', err);
+    }
+  }
+}
+
+async function deleteSessionFromStore(session, env) {
+  if (!session) return;
+  workerCoupleSessions.delete(session.id);
+  workerJoinCodes.delete(session.joinCode.toUpperCase());
+
+  const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
+  if (kv) {
+    try {
+      await Promise.all([
+        kv.delete('session:' + session.id),
+        kv.delete('code:' + session.joinCode.toUpperCase()),
+      ]);
+    } catch (err) {
+      console.warn('KV delete error:', err);
+    }
+  }
+}
+
 function sanitizeSessionForPublic(session, requesterRole) {
   const isACompleted = Boolean(session.participantA?.completed);
   const isBCompleted = Boolean(session.participantB?.completed);
@@ -80,9 +154,10 @@ export default {
     }
 
     const url = new URL(request.url);
+    const normalizedPath = (url.pathname || '/').replace(/\/+$/, '') || '/';
 
     // Health check endpoint
-    if (request.method === 'GET' && (url.pathname === '/api/health' || url.pathname === '/')) {
+    if (request.method === 'GET' && (normalizedPath === '/api/health' || normalizedPath === '' || normalizedPath === '/')) {
       return new Response(
         JSON.stringify({
           status: 'ok',
@@ -94,16 +169,14 @@ export default {
       );
     }
 
-    // Couple Session: GET /api/couple/:id
-    if (request.method === 'GET' && url.pathname.startsWith('/api/couple/')) {
-      const parts = url.pathname.split('/');
+    // Couple Session: GET /api/couple/:id or /couple/:id
+    if (request.method === 'GET' && (normalizedPath.startsWith('/api/couple/') || normalizedPath.startsWith('/couple/'))) {
+      const parts = normalizedPath.split('/');
       const sessionIdOrCode = parts[parts.length - 1];
       const authHeader = request.headers.get('Authorization') || '';
       const token = (authHeader.replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || '').trim();
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
-      const session = workerCoupleSessions.get(sessionId);
+      const session = await getSessionFromStore(sessionIdOrCode, env);
 
       if (!session) {
         return new Response(
@@ -137,11 +210,10 @@ export default {
 
     if (request.method === 'POST') {
       try {
-        const pathname = url.pathname;
         const body = await request.json().catch(() => ({}));
 
-        // Couple Session: POST /api/couple/create
-        if (pathname === '/api/couple/create') {
+        // Couple Session: POST /api/couple/create or /couple/create
+        if (normalizedPath === '/api/couple/create' || normalizedPath === '/couple/create') {
           const { name, story, category, emotion, gender } = body;
           const cleanName = (typeof name === 'string' && name.trim()) || 'نفر اول';
           const cleanStory = (typeof story === 'string' && story.trim()) || '';
@@ -177,8 +249,7 @@ export default {
             participantB: null,
           };
 
-          workerCoupleSessions.set(sessionId, session);
-          workerJoinCodes.set(joinCode.toUpperCase(), sessionId);
+          await saveSessionToStore(session, env);
 
           return new Response(
             JSON.stringify({
@@ -191,8 +262,8 @@ export default {
           );
         }
 
-        // Couple Session: POST /api/couple/join
-        if (pathname === '/api/couple/join') {
+        // Couple Session: POST /api/couple/join or /couple/join
+        if (normalizedPath === '/api/couple/join' || normalizedPath === '/couple/join') {
           const { joinCodeOrId, name } = body;
           if (!joinCodeOrId) {
             return new Response(
@@ -201,9 +272,7 @@ export default {
             );
           }
 
-          const lookupKey = joinCodeOrId.trim().toUpperCase();
-          const sessionId = workerJoinCodes.get(lookupKey) || joinCodeOrId.trim();
-          const session = workerCoupleSessions.get(sessionId);
+          const session = await getSessionFromStore(joinCodeOrId, env);
 
           if (!session) {
             return new Response(
@@ -233,6 +302,8 @@ export default {
             };
             session.updatedAt = now;
 
+            await saveSessionToStore(session, env);
+
             return new Response(
               JSON.stringify({
                 success: true,
@@ -246,6 +317,7 @@ export default {
 
           if (cleanName && cleanName !== 'همراه' && !session.participantB.completed) {
             session.participantB.name = cleanName;
+            await saveSessionToStore(session, env);
           }
 
           return new Response(
@@ -259,9 +331,9 @@ export default {
           );
         }
 
-        // Couple Session: POST /api/couple/:id/submit
-        if (pathname.startsWith('/api/couple/') && pathname.endsWith('/submit')) {
-          const parts = pathname.split('/');
+        // Couple Session: POST /api/couple/:id/submit or /couple/:id/submit
+        if ((normalizedPath.startsWith('/api/couple/') || normalizedPath.startsWith('/couple/')) && normalizedPath.endsWith('/submit')) {
+          const parts = normalizedPath.split('/');
           const sessionIdOrCode = parts[parts.length - 2];
           const { token, role, name, story, category, emotion, gender } = body;
 
@@ -272,9 +344,7 @@ export default {
             );
           }
 
-          const lookupKey = sessionIdOrCode.trim().toUpperCase();
-          const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
-          const session = workerCoupleSessions.get(sessionId);
+          const session = await getSessionFromStore(sessionIdOrCode, env);
 
           if (!session) {
             return new Response(
@@ -323,6 +393,8 @@ export default {
           else if (isACompleted) session.status = 'participant_a_completed';
           else if (isBCompleted) session.status = 'participant_b_completed';
 
+          await saveSessionToStore(session, env);
+
           return new Response(
             JSON.stringify({
               success: true,
@@ -332,17 +404,14 @@ export default {
           );
         }
 
-        // Couple Session: POST /api/couple/:id/leave
-        if (pathname.startsWith('/api/couple/') && pathname.endsWith('/leave')) {
-          const parts = pathname.split('/');
+        // Couple Session: POST /api/couple/:id/leave or /couple/:id/leave
+        if ((normalizedPath.startsWith('/api/couple/') || normalizedPath.startsWith('/couple/')) && normalizedPath.endsWith('/leave')) {
+          const parts = normalizedPath.split('/');
           const sessionIdOrCode = parts[parts.length - 2];
-          const lookupKey = sessionIdOrCode.trim().toUpperCase();
-          const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
+          const session = await getSessionFromStore(sessionIdOrCode, env);
 
-          const session = workerCoupleSessions.get(sessionId);
           if (session) {
-            workerJoinCodes.delete(session.joinCode.toUpperCase());
-            workerCoupleSessions.delete(sessionId);
+            await deleteSessionFromStore(session, env);
           }
 
           return new Response(
