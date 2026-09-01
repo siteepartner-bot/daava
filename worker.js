@@ -515,7 +515,7 @@ export default {
 
           const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
 
-          const candidateModels = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+          const candidateModels = ['gemini-3.7-flash', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
           let parsedAnalysis = null;
 
           for (const model of candidateModels) {
@@ -587,15 +587,16 @@ export default {
 
         // Models supported on Google Gemini API
         const candidateModels = [
-          'gemini-3.5-flash',
-          'gemini-3.6-flash',
-          'gemini-3.5-flash-lite',
+          'gemini-3.7-flash',
+          'gemini-2.5-flash',
+          'gemini-2.0-flash',
+          'gemini-1.5-flash',
         ];
 
         // ---------------------------------------------------------------------------------
         // 1. REWRITE REPLY ENDPOINT (/api/rewrite-reply)
         // ---------------------------------------------------------------------------------
-        if (pathname === '/api/rewrite-reply' || body.action === 'rewrite') {
+        if (normalizedPath === '/api/rewrite-reply' || body.action === 'rewrite') {
           const { originalMessage, tone, userInstruction, conflictContext } = body;
 
           if (!originalMessage || typeof originalMessage !== 'string') {
@@ -704,7 +705,7 @@ export default {
         // ---------------------------------------------------------------------------------
         // 2. SUGGEST REPLIES ENDPOINT (/api/suggest-replies)
         // ---------------------------------------------------------------------------------
-        if (pathname === '/api/suggest-replies' || body.action === 'suggest_replies') {
+        if (normalizedPath === '/api/suggest-replies' || body.action === 'suggest_replies') {
           const {
             story,
             category,
