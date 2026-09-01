@@ -29,6 +29,35 @@ export function setStoredToken(token: string | null) {
   }
 }
 
+function getAuthApiEndpoints(route: string): { primary: string; fallback: string | null } {
+  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
+  let savedWorkerUrl = '';
+  if (typeof window !== 'undefined') {
+    savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
+  }
+
+  const metaEnv = (import.meta as any)?.env;
+  const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
+
+  let primaryEndpoint = route;
+  let fallbackEndpoint: string | null = `${CLOUDFLARE_WORKER_URL}${route}`;
+
+  if (configuredWorker) {
+    const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
+    primaryEndpoint = `${cleanUrl}${route}`;
+    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+  } else if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('workers.dev') ||
+      window.location.hostname.includes('pages.dev'))
+  ) {
+    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+    fallbackEndpoint = route;
+  }
+
+  return { primary: primaryEndpoint, fallback: fallbackEndpoint };
+}
+
 async function authFetch(route: string, options: RequestInit = {}): Promise<any> {
   const token = getStoredToken();
   const headers: Record<string, string> = {
@@ -39,20 +68,46 @@ async function authFetch(route: string, options: RequestInit = {}): Promise<any>
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  let response: Response;
+  const { primary, fallback } = getAuthApiEndpoints(route);
+
+  let response: Response | null = null;
+  let responseData: any = null;
+
+  // 1. Try primary endpoint
   try {
-    response = await fetch(route, { ...options, headers });
-  } catch (err) {
-    throw new Error('خطا در برقراری ارتباط با سرور. لطفاً اینترنت خود را بررسی کنید.');
+    const res = await fetch(primary, { ...options, headers });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok || (res.status !== 404 && res.status < 500 && (data.message || data.error))) {
+      response = res;
+      responseData = data;
+    }
+  } catch {
+    // Primary network error
   }
 
-  const data = await response.json().catch(() => ({}));
+  // 2. Fallback if primary endpoint failed or gave 404/500
+  if (!response && fallback && fallback !== primary) {
+    try {
+      const res = await fetch(fallback, { ...options, headers });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok || res.status < 500) {
+        response = res;
+        responseData = data;
+      }
+    } catch {
+      // Fallback network error
+    }
+  }
+
+  if (!response) {
+    throw new Error('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت را بررسی کنید.');
+  }
 
   if (!response.ok) {
-    throw new Error(data.message || 'خطایی در پردازش درخواست پیش آمد 🤍');
+    throw new Error(responseData?.message || responseData?.error || 'خطایی در پردازش درخواست پیش آمد 🤍');
   }
 
-  return data;
+  return responseData;
 }
 
 export async function registerUser(name: string, email: string, password: string) {

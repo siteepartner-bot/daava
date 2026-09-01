@@ -296,7 +296,7 @@ export default {
   async fetch(request, env) {
     const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     };
 
@@ -396,8 +396,8 @@ export default {
       );
     }
 
-    // Auth & Profile: PUT /api/auth/update
-    if (request.method === 'PUT' && (normalizedPath === '/api/auth/update' || normalizedPath === '/auth/update')) {
+    // Auth & Profile: POST/PUT /api/auth/profile or /api/auth/update
+    if ((request.method === 'POST' || request.method === 'PUT') && (normalizedPath === '/api/auth/profile' || normalizedPath === '/auth/profile' || normalizedPath === '/api/auth/update' || normalizedPath === '/auth/update')) {
       const user = await getUserByTokenWorker(request, env);
       if (!user) {
         return new Response(
@@ -424,8 +424,8 @@ export default {
       );
     }
 
-    // Auth & Profile: DELETE /api/auth/delete
-    if (request.method === 'DELETE' && (normalizedPath === '/api/auth/delete' || normalizedPath === '/auth/delete')) {
+    // Auth & Profile: DELETE /api/auth/account or /api/auth/delete
+    if (request.method === 'DELETE' && (normalizedPath === '/api/auth/account' || normalizedPath === '/auth/account' || normalizedPath === '/api/auth/delete' || normalizedPath === '/auth/delete')) {
       const user = await getUserByTokenWorker(request, env);
       if (!user) {
         return new Response(
@@ -589,6 +589,14 @@ export default {
               token,
               stats,
             }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Auth: POST /api/auth/logout
+        if (normalizedPath === '/api/auth/logout' || normalizedPath === '/auth/logout') {
+          return new Response(
+            JSON.stringify({ success: true, message: 'با موفقیت خارج شدید.' }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
