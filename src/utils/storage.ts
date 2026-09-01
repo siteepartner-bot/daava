@@ -1,4 +1,4 @@
-import { SavedConflictRecord, ConflictAnalysisResult, AnalysisMode, ConflictCategory, EmotionType } from '../types';
+import { SavedConflictRecord, ConflictAnalysisResult, AnalysisMode, ConflictCategory, EmotionType, GenderType } from '../types';
 
 const STORAGE_KEY = 'aromeshkon_conflict_history_v1';
 
@@ -28,7 +28,8 @@ export function saveConflictToHistory(
   story: string,
   category: ConflictCategory | null,
   emotion: EmotionType | null,
-  analysis: ConflictAnalysisResult
+  analysis: ConflictAnalysisResult,
+  gender?: GenderType | null
 ): SavedConflictRecord[] {
   try {
     const current = getHistory();
@@ -40,6 +41,7 @@ export function saveConflictToHistory(
       story,
       category,
       emotion,
+      gender: gender || null,
       analysis,
     };
 

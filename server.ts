@@ -153,7 +153,7 @@ async function startServer() {
   // Main Gemini Conflict Analysis Endpoint
   app.post('/api/analyze', async (req: Request, res: Response): Promise<void> => {
     try {
-      const { story, category, emotion } = req.body;
+      const { story, category, emotion, gender } = req.body;
 
       if (!story || typeof story !== 'string' || story.trim().length < 20) {
         res.status(400).json({
@@ -183,7 +183,14 @@ async function startServer() {
 
       const ai = getGeminiClient();
 
-      const systemInstruction = `تو یک میانجی بی‌طرف برای اختلافات انسانی هستی.
+      const genderLabel =
+        gender === 'female'
+          ? 'دختر (خانم)'
+          : gender === 'male'
+          ? 'پسر (آقا)'
+          : 'مشخص نشده';
+
+      const systemInstruction = `تو یک میانجی بی‌طرف و مشاور همدل برای حل اختلافات انسانی هستی.
 هدف تو پیدا کردن مقصر نیست.
 هدف تو کمک به کاربر برای فهمیدن احساسات، نیازها، سوءتفاهم‌ها و عوامل تشدیدکننده اختلاف است.
 
@@ -198,13 +205,17 @@ async function startServer() {
 8. هدف، کاهش تنش و شروع گفت‌وگوی سالم است.
 9. از سرزنش، تحقیر یا تحریک کاربر خودداری کن.
 10. اگر نشانه‌ای از خشونت، تهدید یا خطر فوری وجود دارد، اولویت را روی امنیت و فاصله گرفتن از موقعیت خطرناک قرار بده.
+11. جنسیت کاربر را در تنظیم دقیق لحن پیام‌های پیشنهادی (از جهت طبیعی بودن ادبیات فارسی، حس همدلی و پویایی‌های روان‌شناختی رابطه) لحاظ کن؛ به طوری که جملات پیشنهادی کاملاً طبیعی و از زبان گوینده به طرف مقابل باشند بدون افتادن در کلیشه‌های منفی.
 
 فقط و فقط یک JSON معتبر مطابق با ساختار درخواست‌شده بازگردان. از نوشتن هرگونه تگ مارک‌داون یا توضیحات خارج از JSON اکیداً خودداری کن.`;
 
       const userPrompt = `اطلاعات کاربر:
 
-داستان:
+داستان ماجرا:
 ${story.trim()}
+
+جنسیت کاربر (گوینده داستان):
+${genderLabel}
 
 موضوع:
 ${category || 'مشخص نشده'}
@@ -212,7 +223,7 @@ ${category || 'مشخص نشده'}
 احساس فعلی:
 ${emotion || 'مشخص نشده'}
 
-لطفاً این ماجرا را با دقت، همدلی و بی‌طرفی کامل تحلیل کن و نتیجه را در قالب ساختار JSON مشخص‌شده بازگردان.`;
+لطفاً این ماجرا را با دقت، همدلی، توجه به پویایی‌های رابطه و بی‌طرفی کامل تحلیل کن و نتیجه را در قالب ساختار JSON مشخص‌شده بازگردان.`;
 
       const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
       let responseText: string | undefined;

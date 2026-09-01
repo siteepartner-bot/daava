@@ -43,6 +43,7 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
         story: text,
         category,
         emotion,
+        gender: input.gender || null,
       }),
     });
   } catch (netErr: any) {

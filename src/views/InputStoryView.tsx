@@ -5,7 +5,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { EmotionChip } from '../components/EmotionChip';
 import { ProgressIndicator } from '../components/ProgressIndicator';
-import { ConflictCategory, EmotionType, AnalysisMode, StoryInputState } from '../types';
+import { ConflictCategory, EmotionType, AnalysisMode, StoryInputState, GenderType } from '../types';
 import { CATEGORIES, EMOTIONS, SAMPLE_STORIES } from '../data/mockData';
 
 interface InputStoryViewProps {
@@ -27,6 +27,9 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
   );
   const [emotion, setEmotion] = useState<EmotionType | null>(
     initialState?.emotion !== undefined ? initialState.emotion : null
+  );
+  const [gender, setGender] = useState<GenderType | null>(
+    initialState?.gender !== undefined ? initialState.gender : null
   );
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -72,6 +75,7 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
       storyText: cleanText,
       category,
       emotion,
+      gender,
     });
   };
 
@@ -156,6 +160,55 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
                 <span>{errorMessage}</span>
               </div>
             )}
+          </div>
+
+          {/* Gender Selection */}
+          <div>
+            <div className="flex items-center justify-between mb-2.5">
+              <label className="block text-xs md:text-sm font-bold text-[#2D2A32]">
+                شما:
+              </label>
+              <span className="text-[11px] text-[#64748B] bg-slate-100 px-2 py-0.5 rounded-md">
+                تاثیر در تحلیل و لحن پیام‌ها
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setGender((prev) => (prev === 'female' ? null : 'female'))}
+                className={`flex items-center gap-2 px-4 py-2 rounded-2xl border text-xs md:text-sm font-bold transition-all cursor-pointer ${
+                  gender === 'female'
+                    ? 'bg-rose-50 border-rose-400 text-rose-900 ring-2 ring-rose-200 shadow-xs'
+                    : 'bg-white border-purple-200/80 text-[#2D2A32] hover:bg-rose-50/40 hover:border-rose-300'
+                }`}
+              >
+                <span className="text-base">👩</span>
+                <span>دخترم</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGender((prev) => (prev === 'male' ? null : 'male'))}
+                className={`flex items-center gap-2 px-4 py-2 rounded-2xl border text-xs md:text-sm font-bold transition-all cursor-pointer ${
+                  gender === 'male'
+                    ? 'bg-blue-50 border-blue-400 text-blue-900 ring-2 ring-blue-200 shadow-xs'
+                    : 'bg-white border-purple-200/80 text-[#2D2A32] hover:bg-blue-50/40 hover:border-blue-300'
+                }`}
+              >
+                <span className="text-base">👨</span>
+                <span>پسرم</span>
+              </button>
+
+              {gender && (
+                <button
+                  type="button"
+                  onClick={() => setGender(null)}
+                  className="text-[11px] text-[#64748B] hover:text-purple-700 underline underline-offset-2 pr-1 transition-colors cursor-pointer"
+                >
+                  حذف انتخاب
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Conflict Category Selection */}

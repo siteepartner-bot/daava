@@ -36,13 +36,17 @@ export type ResponseTone =
   | 'emotional' // 🥺 احساسی
   | 'friendly'; // 🙂 دوستانه
 
+export type GenderType = 'female' | 'male';
+
 export interface ConflictInput {
   mode: AnalysisMode;
   storyText: string;
   category?: ConflictCategory | null;
   emotion?: EmotionType | null;
+  gender?: GenderType | null;
   partnerStoryText?: string;
   partnerEmotion?: EmotionType | null;
+  partnerGender?: GenderType | null;
 }
 
 export interface StoryInputState {
@@ -50,8 +54,10 @@ export interface StoryInputState {
   storyText: string;
   category: ConflictCategory | null;
   emotion: EmotionType | null;
+  gender?: GenderType | null;
   partnerStoryText?: string;
   partnerEmotion?: EmotionType | null;
+  partnerGender?: GenderType | null;
 }
 
 export interface BehaviorEvaluation {
@@ -112,6 +118,7 @@ export interface SavedConflictRecord {
   story: string;
   category: ConflictCategory | null;
   emotion: EmotionType | null;
+  gender?: GenderType | null;
   analysis: ConflictAnalysisResult;
 }
 

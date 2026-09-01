@@ -109,6 +109,7 @@ export default function App() {
         storyText: state.storyText,
         category: state.category,
         emotion: state.emotion,
+        gender: state.gender,
       });
 
       setAnalysisResult(result);
@@ -119,7 +120,8 @@ export default function App() {
         state.storyText,
         state.category,
         state.emotion,
-        result
+        result,
+        state.gender
       );
       setHistoryItems(updatedHistory);
       setIsAILoadingDone(true);
@@ -148,6 +150,7 @@ export default function App() {
       storyText: item.story,
       category: item.category,
       emotion: item.emotion,
+      gender: item.gender,
     });
     setAnalysisResult(item.analysis);
     setCurrentView('analysis-result');

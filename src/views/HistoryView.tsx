@@ -132,6 +132,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
                         </span>
                       )}
 
+                      {item.gender && (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 font-medium">
+                          <span>{item.gender === 'female' ? '👩 دختر' : '👨 پسر'}</span>
+                        </span>
+                      )}
+
                       <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-700">
                         {item.mode === 'couple' ? (
                           <>
