@@ -32,15 +32,33 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
   const category: ConflictCategory = input.category || detectCategoryFromText(text);
   const emotion: EmotionType = input.emotion || detectEmotionFromText(text);
 
-  let endpoint = '/api/analyze';
+  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   const metaEnv = (import.meta as any)?.env;
-  if (metaEnv?.VITE_WORKER_API_URL) {
-    endpoint = metaEnv.VITE_WORKER_API_URL;
+  const configuredWorker = metaEnv?.VITE_WORKER_API_URL;
+
+  // Determine primary and fallback endpoints
+  let primaryEndpoint = '/api/analyze';
+  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
+
+  if (configuredWorker) {
+    primaryEndpoint = configuredWorker;
+    fallbackEndpoint = CLOUDFLARE_WORKER_URL;
+  } else if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('workers.dev') ||
+      window.location.hostname.includes('pages.dev'))
+  ) {
+    // If running on Cloudflare directly
+    primaryEndpoint = CLOUDFLARE_WORKER_URL;
+    fallbackEndpoint = '/api/analyze';
   }
 
-  let response: Response;
+  let response: Response | null = null;
+  let lastError: any = null;
+
+  // Try primary endpoint first
   try {
-    response = await fetch(endpoint, {
+    response = await fetch(primaryEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -52,9 +70,36 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
         gender: input.gender || null,
       }),
     });
-  } catch (netErr: any) {
-    console.error('Network error during analysis request:', netErr);
-    throw new Error('عدم دسترسی به اینترنت یا قطع ارتباط با سرور.');
+  } catch (err) {
+    lastError = err;
+  }
+
+  // If primary failed (e.g. 404, 502, network failure) and fallback exists, try fallback
+  if ((!response || !response.ok) && fallbackEndpoint && fallbackEndpoint !== primaryEndpoint) {
+    try {
+      const fallbackResp = await fetch(fallbackEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          story: text,
+          category,
+          emotion,
+          gender: input.gender || null,
+        }),
+      });
+      if (fallbackResp.ok) {
+        response = fallbackResp;
+      }
+    } catch {
+      // Keep original response or error
+    }
+  }
+
+  if (!response) {
+    console.error('Network error during analysis request:', lastError);
+    throw new Error('عدم دسترسی به اینترنت یا قطع ارتباط با سرور هوش مصنوعی.');
   }
 
   if (!response.ok) {
