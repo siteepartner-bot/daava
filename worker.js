@@ -5,7 +5,66 @@
  * - POST /api/analyze (یا POST /) -> تحلیل کامل دعوا
  * - POST /api/suggest-replies -> تولید ۵ لحن پیام یا بازتولید یک لحن
  * - POST /api/rewrite-reply -> بازنویسی پیام بر اساس دستور کاربر
+ * - POST /api/couple/create -> ایجاد جلسه دونفره
+ * - POST /api/couple/join -> ورود نفر دوم به جلسه
+ * - GET /api/couple/:id -> دریافت وضعیت جلسه (امن و با حفظ حریم خصوصی)
+ * - POST /api/couple/:id/submit -> ثبت دیدگاه نفر اول یا دوم
+ * - POST /api/couple/:id/leave -> خروج از جلسه
  */
+
+// In-memory sessions store for Worker instance
+const workerCoupleSessions = new Map();
+const workerJoinCodes = new Map();
+
+function generateJoinCode() {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  for (let attempt = 0; attempt < 100; attempt++) {
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    if (!workerJoinCodes.has(code)) {
+      return code;
+    }
+  }
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+function sanitizeSessionForPublic(session, requesterRole) {
+  const isACompleted = Boolean(session.participantA?.completed);
+  const isBCompleted = Boolean(session.participantB?.completed);
+  const isReady = isACompleted && isBCompleted;
+
+  return {
+    id: session.id,
+    joinCode: session.joinCode,
+    status: isReady ? 'ready_for_analysis' : session.status,
+    createdAt: session.createdAt,
+    expiresAt: session.expiresAt,
+    participantA: {
+      name: session.participantA.name,
+      completed: isACompleted,
+      completedAt: session.participantA.completedAt,
+    },
+    participantB: session.participantB
+      ? {
+          name: session.participantB.name,
+          completed: isBCompleted,
+          completedAt: session.participantB.completedAt,
+        }
+      : null,
+    isParticipantACompleted: isACompleted,
+    isParticipantBCompleted: isBCompleted,
+    isReadyForAnalysis: isReady,
+    yourRole: requesterRole,
+    yourCompleted:
+      requesterRole === 'participantA'
+        ? isACompleted
+        : requesterRole === 'participantB'
+        ? isBCompleted
+        : false,
+  };
+}
 
 export default {
   async fetch(request, env) {
@@ -35,8 +94,263 @@ export default {
       );
     }
 
+    // Couple Session: GET /api/couple/:id
+    if (request.method === 'GET' && url.pathname.startsWith('/api/couple/')) {
+      const parts = url.pathname.split('/');
+      const sessionIdOrCode = parts[parts.length - 1];
+      const authHeader = request.headers.get('Authorization') || '';
+      const token = (authHeader.replace(/^Bearer\s+/i, '') || url.searchParams.get('token') || '').trim();
+
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
+      const session = workerCoupleSessions.get(sessionId);
+
+      if (!session) {
+        return new Response(
+          JSON.stringify({ error: 'SESSION_NOT_FOUND', message: 'جلسه پیدا نشد.' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (session.expiresAt < Date.now()) {
+        return new Response(
+          JSON.stringify({ error: 'SESSION_EXPIRED', message: 'این جلسه دیگه فعال نیست 🤍' }),
+          { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      let role;
+      if (token) {
+        if (session.participantA?.token === token) role = 'participantA';
+        else if (session.participantB?.token === token) role = 'participantB';
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          session: sanitizeSessionForPublic(session, role),
+          yourRole: role,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     if (request.method === 'POST') {
       try {
+        const pathname = url.pathname;
+        const body = await request.json().catch(() => ({}));
+
+        // Couple Session: POST /api/couple/create
+        if (pathname === '/api/couple/create') {
+          const { name, story, category, emotion, gender } = body;
+          const cleanName = (typeof name === 'string' && name.trim()) || 'نفر اول';
+          const cleanStory = (typeof story === 'string' && story.trim()) || '';
+          const hasStory = cleanStory.length >= 20;
+
+          const sessionId = 'cs_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+          const joinCode = generateJoinCode();
+          const tokenA = 'tok_' + Math.random().toString(36).substring(2, 15);
+          const now = Date.now();
+          const expiresAt = now + 24 * 60 * 60 * 1000;
+
+          const participantA = {
+            id: 'pA',
+            name: cleanName,
+            token: tokenA,
+            story: hasStory ? cleanStory : undefined,
+            category: category || null,
+            emotion: emotion || null,
+            gender: gender || null,
+            completed: hasStory,
+            completedAt: hasStory ? now : undefined,
+            createdAt: now,
+          };
+
+          const session = {
+            id: sessionId,
+            joinCode,
+            createdAt: now,
+            updatedAt: now,
+            expiresAt,
+            status: hasStory ? 'participant_a_completed' : 'waiting',
+            participantA,
+            participantB: null,
+          };
+
+          workerCoupleSessions.set(sessionId, session);
+          workerJoinCodes.set(joinCode.toUpperCase(), sessionId);
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              session: sanitizeSessionForPublic(session, 'participantA'),
+              token: tokenA,
+              role: 'participantA',
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Couple Session: POST /api/couple/join
+        if (pathname === '/api/couple/join') {
+          const { joinCodeOrId, name } = body;
+          if (!joinCodeOrId) {
+            return new Response(
+              JSON.stringify({ error: 'INVALID_CODE', message: 'کد دعوت نامعتبر است.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const lookupKey = joinCodeOrId.trim().toUpperCase();
+          const sessionId = workerJoinCodes.get(lookupKey) || joinCodeOrId.trim();
+          const session = workerCoupleSessions.get(sessionId);
+
+          if (!session) {
+            return new Response(
+              JSON.stringify({ error: 'SESSION_NOT_FOUND', message: 'جلسه‌ای با این کد دعوت پیدا نشد.' }),
+              { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          if (session.expiresAt < Date.now()) {
+            return new Response(
+              JSON.stringify({ error: 'SESSION_EXPIRED', message: 'این جلسه دیگه فعال نیست 🤍' }),
+              { status: 410, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
+          const now = Date.now();
+
+          if (!session.participantB) {
+            const tokenB = 'tok_' + Math.random().toString(36).substring(2, 15);
+            session.participantB = {
+              id: 'pB',
+              name: cleanName,
+              token: tokenB,
+              completed: false,
+              createdAt: now,
+            };
+            session.updatedAt = now;
+
+            return new Response(
+              JSON.stringify({
+                success: true,
+                session: sanitizeSessionForPublic(session, 'participantB'),
+                token: tokenB,
+                role: 'participantB',
+              }),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          if (cleanName && cleanName !== 'همراه' && !session.participantB.completed) {
+            session.participantB.name = cleanName;
+          }
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              session: sanitizeSessionForPublic(session, 'participantB'),
+              token: session.participantB.token,
+              role: 'participantB',
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Couple Session: POST /api/couple/:id/submit
+        if (pathname.startsWith('/api/couple/') && pathname.endsWith('/submit')) {
+          const parts = pathname.split('/');
+          const sessionIdOrCode = parts[parts.length - 2];
+          const { token, role, name, story, category, emotion, gender } = body;
+
+          if (!story || typeof story !== 'string' || story.trim().length < 20) {
+            return new Response(
+              JSON.stringify({ error: 'INVALID_STORY', message: 'یکم بیشتر برامون تعریف کن تا بهتر بفهمیم 🤍' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const lookupKey = sessionIdOrCode.trim().toUpperCase();
+          const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
+          const session = workerCoupleSessions.get(sessionId);
+
+          if (!session) {
+            return new Response(
+              JSON.stringify({ error: 'SESSION_NOT_FOUND', message: 'جلسه پیدا نشد.' }),
+              { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const now = Date.now();
+          let targetRole = (role === 'participantA' || role === 'participantB') ? role : (session.participantA.token === token ? 'participantA' : 'participantB');
+
+          if (targetRole === 'participantA') {
+            if (name) session.participantA.name = name.trim();
+            session.participantA.story = story.trim();
+            session.participantA.category = category || null;
+            session.participantA.emotion = emotion || null;
+            session.participantA.gender = gender || null;
+            session.participantA.completed = true;
+            session.participantA.completedAt = now;
+          } else {
+            if (!session.participantB) {
+              session.participantB = {
+                id: 'pB',
+                name: (name && name.trim()) || 'همراه',
+                token: token || 'tok_' + Math.random().toString(36).substring(2, 10),
+                completed: true,
+                completedAt: now,
+                createdAt: now,
+              };
+            } else {
+              if (name) session.participantB.name = name.trim();
+              session.participantB.completed = true;
+              session.participantB.completedAt = now;
+            }
+            session.participantB.story = story.trim();
+            session.participantB.category = category || null;
+            session.participantB.emotion = emotion || null;
+            session.participantB.gender = gender || null;
+          }
+
+          session.updatedAt = now;
+
+          const isACompleted = Boolean(session.participantA?.completed);
+          const isBCompleted = Boolean(session.participantB?.completed);
+          if (isACompleted && isBCompleted) session.status = 'ready_for_analysis';
+          else if (isACompleted) session.status = 'participant_a_completed';
+          else if (isBCompleted) session.status = 'participant_b_completed';
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              session: sanitizeSessionForPublic(session, targetRole),
+            }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Couple Session: POST /api/couple/:id/leave
+        if (pathname.startsWith('/api/couple/') && pathname.endsWith('/leave')) {
+          const parts = pathname.split('/');
+          const sessionIdOrCode = parts[parts.length - 2];
+          const lookupKey = sessionIdOrCode.trim().toUpperCase();
+          const sessionId = workerJoinCodes.get(lookupKey) || sessionIdOrCode.trim();
+
+          const session = workerCoupleSessions.get(sessionId);
+          if (session) {
+            workerJoinCodes.delete(session.joinCode.toUpperCase());
+            workerCoupleSessions.delete(sessionId);
+          }
+
+          return new Response(
+            JSON.stringify({ success: true, message: 'از جلسه خارج شدید.' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
         const apiKey = env?.GEMINI_API_KEY;
         if (!apiKey) {
           return new Response(
@@ -47,9 +361,6 @@ export default {
             { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }
-
-        const body = await request.json().catch(() => ({}));
-        const pathname = url.pathname;
 
         // Models supported on Google Gemini API
         const candidateModels = [

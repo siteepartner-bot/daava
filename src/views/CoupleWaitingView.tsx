@@ -1,20 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  Users,
-  Copy,
-  Check,
-  Share2,
-  Lock,
-  ArrowRight,
-  Sparkles,
-  UserCheck,
+  CheckCircle2,
   Clock,
+  UserCheck,
+  Sparkles,
   LogOut,
   RefreshCw,
   AlertCircle,
   ShieldCheck,
-  Edit3,
+  HeartHandshake,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -22,36 +17,27 @@ import { LeaveSessionModal } from '../components/LeaveSessionModal';
 import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
 import { getCoupleSessionStatus, leaveCoupleSession } from '../services/coupleService';
 
-interface CoupleInviteViewProps {
+interface CoupleWaitingViewProps {
   session: CoupleSessionPublicState;
   auth: LocalCoupleSessionAuth;
   onSessionUpdated: (session: CoupleSessionPublicState) => void;
-  onOpenStoryEditor?: () => void;
-  onBack: () => void;
   onLeaveSession: () => void;
   onNotify: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
-export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
+export const CoupleWaitingView: React.FC<CoupleWaitingViewProps> = ({
   session,
   auth,
   onSessionUpdated,
-  onOpenStoryEditor,
-  onBack,
   onLeaveSession,
   onNotify,
 }) => {
-  const [copied, setCopied] = useState(false);
   const [isPollingLoading, setIsPollingLoading] = useState(false);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
-
-  // Generate shareable link
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://aramkon.app';
-  const inviteLink = `${origin}/?join=${session.joinCode}`;
 
   const fetchLatestStatus = useCallback(async (silent = true) => {
     if (!silent) setIsPollingLoading(true);
@@ -75,7 +61,6 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
     }
   }, [session.id, session.joinCode, auth.token, onSessionUpdated]);
 
-  // Polling every 3.5 seconds
   useEffect(() => {
     isMountedRef.current = true;
     const interval = setInterval(() => {
@@ -87,45 +72,6 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
       clearInterval(interval);
     };
   }, [fetchLatestStatus]);
-
-  const handleCopyLink = async () => {
-    try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(inviteLink);
-      } else {
-        const textArea = document.createElement('textarea');
-        textArea.value = inviteLink;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-      }
-      setCopied(true);
-      onNotify('لینک کپی شد ✓', 'success');
-      setTimeout(() => setCopied(false), 2500);
-    } catch {
-      onNotify('کپی لینک با خطا مواجه شد', 'error');
-    }
-  };
-
-  const handleShare = async () => {
-    const shareText = 'بیا دعوامون رو بدون طرفداری بررسی کنیم 🤍';
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      try {
-        await navigator.share({
-          title: 'تحلیل آرام دعوا در آرومش کن',
-          text: shareText,
-          url: inviteLink,
-        });
-      } catch (err: any) {
-        if (err?.name !== 'AbortError') {
-          handleCopyLink();
-        }
-      }
-    } else {
-      handleCopyLink();
-    }
-  };
 
   const handleConfirmLeave = async () => {
     setIsLeaving(true);
@@ -141,21 +87,20 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
     }
   };
 
-  const isUserCompleted = session.isParticipantACompleted;
-  const isPartnerCompleted = session.isParticipantBCompleted;
-  const isReady = session.isReadyForAnalysis || (isUserCompleted && isPartnerCompleted);
+  const isRoleA = auth.role === 'participantA';
+  const isMyCompleted = isRoleA ? session.isParticipantACompleted : session.isParticipantBCompleted;
+  const isPartnerCompleted = isRoleA ? session.isParticipantBCompleted : session.isParticipantACompleted;
+  const myName = isRoleA ? session.participantA.name : (session.participantB?.name || auth.name || 'تو');
+  const partnerName = isRoleA ? (session.participantB?.name || 'طرف مقابل') : session.participantA.name;
+  const isReady = session.isReadyForAnalysis || (session.isParticipantACompleted && session.isParticipantBCompleted);
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 md:py-8 space-y-6">
-      {/* Top Header & Actions */}
+      {/* Top Bar */}
       <div className="flex items-center justify-between">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1 text-xs md:text-sm text-[#64748B] hover:text-[#7E57C2] transition-colors cursor-pointer"
-        >
-          <ArrowRight className="w-4 h-4" />
-          <span>بازگشت</span>
-        </button>
+        <span className="text-xs bg-purple-100/80 text-purple-900 px-3 py-1.5 rounded-full font-medium">
+          جلسه دونفره — کد {session.joinCode}
+        </span>
 
         <div className="flex items-center gap-2">
           <button
@@ -177,25 +122,27 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
         </div>
       </div>
 
-      {/* Main Status Header */}
+      {/* Main Success / Waiting Header */}
       <div className="text-center space-y-2">
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="w-14 h-14 mx-auto rounded-3xl bg-gradient-to-tr from-purple-600 to-pink-500 text-white flex items-center justify-center shadow-md shadow-purple-200"
+          className="w-14 h-14 mx-auto rounded-3xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-white flex items-center justify-center shadow-md shadow-emerald-200"
         >
-          <Users className="w-7 h-7" />
+          <CheckCircle2 className="w-8 h-8" />
         </motion.div>
 
         <h2 className="text-2xl sm:text-3xl font-extrabold text-[#2D2A32]">
-          جلسه شما آماده است 🤍
+          دیدگاهت ثبت شد ✓
         </h2>
         <p className="text-xs sm:text-sm text-[#64748B] max-w-md mx-auto leading-relaxed">
-          این لینک رو برای طرف مقابلت بفرست تا بدون مشاهده پاسخ شما، دیدگاه خودش رو ثبت کنه.
+          {isReady
+            ? 'هر دو دیدگاه با موفقیت دریافت شدند و جلسه آماده بررسی مشترک است.'
+            : 'حالا منتظریم طرف مقابل هم دیدگاهش رو ثبت کنه.'}
         </p>
       </div>
 
-      {/* Session Expired Error Banner if any */}
+      {/* Expired alert if any */}
       {sessionError && (
         <Card className="p-4 border-rose-300 bg-rose-50/80 text-center space-y-2">
           <div className="flex items-center justify-center gap-2 text-rose-800 font-bold text-sm">
@@ -203,123 +150,57 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
             <span>{sessionError}</span>
           </div>
           <Button size="sm" variant="secondary" onClick={onLeaveSession}>
-            ساخت جلسه جدید
+            بازگشت به صفحه اصلی
           </Button>
         </Card>
       )}
 
-      {/* Dedicated Invite Link Card */}
-      <Card className="border-purple-200 bg-white p-5 md:p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold text-[#2D2A32] flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-purple-600" />
-            <span>لینک اختصاصی دعوت</span>
-          </span>
-          <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-100">
-            کد جلسه: {session.joinCode}
-          </span>
-        </div>
-
-        {/* Link Box */}
-        <div className="flex items-center justify-between gap-2 p-3 rounded-2xl bg-[#FAF8FC] border border-purple-100 font-mono text-xs md:text-sm text-purple-900 dir-ltr select-all">
-          <span className="truncate">{inviteLink}</span>
-          <Button
-            size="sm"
-            variant={copied ? 'success' : 'secondary'}
-            onClick={handleCopyLink}
-            icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-          >
-            {copied ? 'کپی شد ✓' : 'کپی لینک'}
-          </Button>
-        </div>
-
-        {/* Share Buttons */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-          <Button
-            variant="primary"
-            onClick={handleShare}
-            icon={<Share2 className="w-4 h-4" />}
-            fullWidth
-          >
-            اشتراک‌گذاری با طرف مقابل
-          </Button>
-          <Button
-            variant="soft-pink"
-            onClick={handleCopyLink}
-            icon={<Copy className="w-4 h-4 text-purple-800" />}
-            fullWidth
-          >
-            {copied ? 'لینک کپی شد ✓' : 'کپی مجدد لینک'}
-          </Button>
-        </div>
-      </Card>
-
-      {/* Participants Live Status Card */}
+      {/* Status Card */}
       <Card className="border-purple-100 bg-[#FAF8FC] p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h4 className="text-xs font-bold text-[#64748B] uppercase tracking-wider">
-            وضعیت شرکت‌کنندگان:
+            وضعیت دیدگاه‌ها:
           </h4>
           <span className="text-[11px] text-purple-700 font-medium flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping" />
-            همگام‌سازی زنده
+            همگام‌سازی لحظه‌ای
           </span>
         </div>
 
         <div className="space-y-3">
-          {/* User A Status */}
+          {/* My status */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white border border-purple-100">
             <div className="flex items-center gap-3">
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                isUserCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-              }`}>
+              <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
                 <UserCheck className="w-4 h-4" />
               </div>
               <div>
                 <span className="text-xs md:text-sm font-bold text-[#2D2A32] block">
-                  دیدگاه شما ({session.participantA?.name || 'نفر اول'})
+                  {myName} (شما)
                 </span>
-                <span className="text-[11px] text-slate-500">
-                  {isUserCompleted ? 'دیدگاه شما ثبت و محفوظ شده' : 'هنوز دیدگاهت رو ننوشتی'}
-                </span>
+                <span className="text-[11px] text-slate-500">دیدگاه شما ثبت و محفوظ شد</span>
               </div>
             </div>
-
-            {isUserCompleted ? (
-              <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                تکمیل کردی 🟢
-              </span>
-            ) : (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={onOpenStoryEditor}
-                icon={<Edit3 className="w-3.5 h-3.5" />}
-              >
-                نوشتن دیدگاه
-              </Button>
-            )}
+            <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              تو تکمیل کردی 🟢
+            </span>
           </div>
 
-          {/* User B Status */}
+          {/* Partner status */}
           <div className="flex items-center justify-between p-3.5 rounded-2xl bg-white border border-purple-100">
             <div className="flex items-center gap-3">
               <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
-                isPartnerCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                isPartnerCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
               }`}>
-                <Clock className="w-4 h-4" />
+                {isPartnerCompleted ? <UserCheck className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
               </div>
               <div>
                 <span className="text-xs md:text-sm font-bold text-[#2D2A32] block">
-                  دیدگاه طرف مقابل {session.participantB?.name ? `(${session.participantB.name})` : ''}
+                  {partnerName}
                 </span>
                 <span className="text-[11px] text-slate-500">
-                  {isPartnerCompleted
-                    ? 'دیدگاه طرف مقابل با موفقیت ثبت شد'
-                    : session.participantB
-                    ? 'وارد جلسه شده و در حال نوشتن است'
-                    : 'در انتظار ورود و ثبت دیدگاه'}
+                  {isPartnerCompleted ? 'دیدگاه ثبت شده' : 'در انتظار ثبت دیدگاه'}
                 </span>
               </div>
             </div>
@@ -339,13 +220,13 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
         </div>
 
         {/* Privacy Note */}
-        <div className="pt-2 flex items-center gap-2 text-xs text-[#64748B]">
+        <div className="pt-1 flex items-center gap-2 text-xs text-[#64748B]">
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
-          <span>پاسخ‌های هیچ‌کدوم برای طرف مقابل فرستاده نمی‌شود تا سوگیری ایجاد نشود.</span>
+          <span>دیدگاه‌ها پس از تکمیل هر دو نفر به صورت هوشمند و محرمانه تحلیل می‌شوند.</span>
         </div>
       </Card>
 
-      {/* Ready for Joint Analysis Banner when both complete */}
+      {/* Ready Banner when both complete */}
       <AnimatePresence>
         {isReady && (
           <motion.div
@@ -362,7 +243,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
               هر دوتون آماده‌اید 🤍
             </h3>
             <p className="text-xs sm:text-sm text-purple-100 max-w-md mx-auto">
-              دیدگاه هر دو نفر با موفقیت ثبت شد. سیستم آماده است تا نقطه مشترک و مقایسه دیدگاه‌ها را استخراج کند.
+              دیدگاه هر دو نفر با موفقیت ثبت شد. سیستم آماده تحلیل دونفره است.
             </p>
 
             <div className="pt-2 max-w-sm mx-auto">
@@ -385,7 +266,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Leave Session Confirmation Modal */}
+      {/* Leave Session Modal */}
       <LeaveSessionModal
         isOpen={isLeaveModalOpen}
         isLoading={isLeaving}

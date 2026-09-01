@@ -522,6 +522,475 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     }
   });
 
+  // ============================================================================
+  // COUPLE SESSION MANAGEMENT ENDPOINTS (Step 5)
+  // ============================================================================
+
+  interface ParticipantRecord {
+    id: string;
+    name: string;
+    token: string;
+    story?: string;
+    category?: string | null;
+    emotion?: string | null;
+    gender?: string | null;
+    completed: boolean;
+    completedAt?: number;
+    createdAt: number;
+  }
+
+  interface CoupleSessionServerRecord {
+    id: string;
+    joinCode: string;
+    createdAt: number;
+    updatedAt: number;
+    expiresAt: number;
+    status: 'waiting' | 'participant_a_completed' | 'participant_b_completed' | 'ready_for_analysis' | 'expired';
+    participantA: ParticipantRecord;
+    participantB?: ParticipantRecord | null;
+  }
+
+  // In-memory sessions map
+  const coupleSessions = new Map<string, CoupleSessionServerRecord>();
+  const joinCodeToSessionId = new Map<string, string>();
+
+  function generateJoinCode(): string {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      let code = '';
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      if (!joinCodeToSessionId.has(code)) {
+        return code;
+      }
+    }
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
+  }
+
+  function generateSecureToken(): string {
+    return (
+      Math.random().toString(36).substring(2, 15) +
+      Math.random().toString(36).substring(2, 15) +
+      Date.now().toString(36)
+    );
+  }
+
+  function sanitizeSessionForPublic(
+    session: CoupleSessionServerRecord,
+    requesterRole?: 'participantA' | 'participantB'
+  ) {
+    const isACompleted = Boolean(session.participantA.completed);
+    const isBCompleted = Boolean(session.participantB?.completed);
+    const isReady = isACompleted && isBCompleted;
+
+    return {
+      id: session.id,
+      joinCode: session.joinCode,
+      status: isReady ? 'ready_for_analysis' : session.status,
+      createdAt: session.createdAt,
+      expiresAt: session.expiresAt,
+      participantA: {
+        name: session.participantA.name,
+        completed: isACompleted,
+        completedAt: session.participantA.completedAt,
+      },
+      participantB: session.participantB
+        ? {
+            name: session.participantB.name,
+            completed: isBCompleted,
+            completedAt: session.participantB.completedAt,
+          }
+        : null,
+      isParticipantACompleted: isACompleted,
+      isParticipantBCompleted: isBCompleted,
+      isReadyForAnalysis: isReady,
+      yourRole: requesterRole,
+      yourCompleted:
+        requesterRole === 'participantA'
+          ? isACompleted
+          : requesterRole === 'participantB'
+          ? isBCompleted
+          : false,
+    };
+  }
+
+  // Periodic cleanup of expired sessions (every 30 mins)
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, s] of coupleSessions.entries()) {
+      if (s.expiresAt < now) {
+        joinCodeToSessionId.delete(s.joinCode);
+        coupleSessions.delete(id);
+      }
+    }
+  }, 30 * 60 * 1000);
+
+  // 1. Create Couple Session
+  app.post('/api/couple/create', (req: Request, res: Response): void => {
+    try {
+      const { name, story, category, emotion, gender } = req.body || {};
+      const cleanName = (typeof name === 'string' && name.trim()) || 'نفر اول';
+      const cleanStory = (typeof story === 'string' && story.trim()) || '';
+      const hasStory = cleanStory.length >= 20;
+
+      const sessionId = 'cs_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
+      const joinCode = generateJoinCode();
+      const tokenA = generateSecureToken();
+      const now = Date.now();
+      const expiresAt = now + 24 * 60 * 60 * 1000; // 24 hours
+
+      const participantA: ParticipantRecord = {
+        id: 'pA',
+        name: cleanName,
+        token: tokenA,
+        story: hasStory ? cleanStory : undefined,
+        category: category || null,
+        emotion: emotion || null,
+        gender: gender || null,
+        completed: hasStory,
+        completedAt: hasStory ? now : undefined,
+        createdAt: now,
+      };
+
+      const sessionRecord: CoupleSessionServerRecord = {
+        id: sessionId,
+        joinCode,
+        createdAt: now,
+        updatedAt: now,
+        expiresAt,
+        status: hasStory ? 'participant_a_completed' : 'waiting',
+        participantA,
+        participantB: null,
+      };
+
+      coupleSessions.set(sessionId, sessionRecord);
+      joinCodeToSessionId.set(joinCode.toUpperCase(), sessionId);
+
+      res.json({
+        success: true,
+        session: sanitizeSessionForPublic(sessionRecord, 'participantA'),
+        token: tokenA,
+        role: 'participantA',
+      });
+    } catch (error: any) {
+      console.error('Error creating couple session:', error);
+      res.status(500).json({
+        error: 'SESSION_CREATE_FAILED',
+        message: 'خطا در ایجاد جلسه دونفره. لطفاً دوباره امتحان کنید.',
+      });
+    }
+  });
+
+  // 2. Join Couple Session
+  app.post('/api/couple/join', (req: Request, res: Response): void => {
+    try {
+      const { joinCodeOrId, name, existingToken } = req.body || {};
+
+      if (!joinCodeOrId || typeof joinCodeOrId !== 'string') {
+        res.status(400).json({
+          error: 'INVALID_CODE',
+          message: 'کد یا شناسه جلسه معتبر نیست.',
+        });
+        return;
+      }
+
+      const lookupKey = joinCodeOrId.trim().toUpperCase();
+      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
+      let session = coupleSessions.get(sessionId);
+
+      if (!session && lookupKey.length === 6) {
+        // Try finding by joinCode in case map had casing differences
+        for (const s of coupleSessions.values()) {
+          if (s.joinCode.toUpperCase() === lookupKey) {
+            session = s;
+            sessionId = s.id;
+            break;
+          }
+        }
+      }
+
+      if (!session) {
+        res.status(404).json({
+          error: 'SESSION_NOT_FOUND',
+          message: 'جلسه‌ای با این کد دعوت پیدا نشد. لطفاً کد را بررسی کنید.',
+        });
+        return;
+      }
+
+      if (session.expiresAt < Date.now()) {
+        res.status(410).json({
+          error: 'SESSION_EXPIRED',
+          message: 'این جلسه دیگه فعال نیست 🤍',
+        });
+        return;
+      }
+
+      // Check if existing participant is re-joining with token
+      if (existingToken) {
+        if (session.participantA.token === existingToken) {
+          res.json({
+            success: true,
+            session: sanitizeSessionForPublic(session, 'participantA'),
+            token: existingToken,
+            role: 'participantA',
+          });
+          return;
+        }
+        if (session.participantB && session.participantB.token === existingToken) {
+          res.json({
+            success: true,
+            session: sanitizeSessionForPublic(session, 'participantB'),
+            token: existingToken,
+            role: 'participantB',
+          });
+          return;
+        }
+      }
+
+      const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
+      const now = Date.now();
+
+      // If participantB doesn't exist yet, create participantB
+      if (!session.participantB) {
+        const tokenB = generateSecureToken();
+        session.participantB = {
+          id: 'pB',
+          name: cleanName,
+          token: tokenB,
+          completed: false,
+          createdAt: now,
+        };
+        session.updatedAt = now;
+
+        res.json({
+          success: true,
+          session: sanitizeSessionForPublic(session, 'participantB'),
+          token: tokenB,
+          role: 'participantB',
+        });
+        return;
+      }
+
+      // If participantB already exists but not completed or updating name
+      if (!session.participantB.completed) {
+        if (cleanName && cleanName !== 'همراه') {
+          session.participantB.name = cleanName;
+        }
+        res.json({
+          success: true,
+          session: sanitizeSessionForPublic(session, 'participantB'),
+          token: session.participantB.token,
+          role: 'participantB',
+        });
+        return;
+      }
+
+      // If both completed or already has participantB with another token
+      res.json({
+        success: true,
+        session: sanitizeSessionForPublic(session, 'participantB'),
+        token: session.participantB.token,
+        role: 'participantB',
+      });
+    } catch (error: any) {
+      console.error('Error joining couple session:', error);
+      res.status(500).json({
+        error: 'SESSION_JOIN_FAILED',
+        message: 'خطا در ورود به جلسه. لطفاً دوباره تلاش کنید.',
+      });
+    }
+  });
+
+  // 3. Get Session Status (Polling)
+  app.get('/api/couple/:id', (req: Request, res: Response): void => {
+    try {
+      const sessionIdOrCode = req.params.id;
+      const token =
+        (req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+          (req.query.token as string) ||
+          '').trim();
+
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
+
+      if (!session) {
+        res.status(404).json({
+          error: 'SESSION_NOT_FOUND',
+          message: 'جلسه مورد نظر پیدا نشد.',
+        });
+        return;
+      }
+
+      if (session.expiresAt < Date.now()) {
+        res.status(410).json({
+          error: 'SESSION_EXPIRED',
+          message: 'این جلسه دیگه فعال نیست 🤍',
+        });
+        return;
+      }
+
+      let requesterRole: 'participantA' | 'participantB' | undefined;
+      if (token) {
+        if (session.participantA.token === token) {
+          requesterRole = 'participantA';
+        } else if (session.participantB && session.participantB.token === token) {
+          requesterRole = 'participantB';
+        }
+      }
+
+      res.json({
+        success: true,
+        session: sanitizeSessionForPublic(session, requesterRole),
+        yourRole: requesterRole,
+      });
+    } catch (error: any) {
+      console.error('Error getting couple session:', error);
+      res.status(500).json({
+        error: 'GET_SESSION_FAILED',
+        message: 'خطا در دریافت وضعیت جلسه.',
+      });
+    }
+  });
+
+  // 4. Submit Participant Story
+  app.post('/api/couple/:id/submit', (req: Request, res: Response): void => {
+    try {
+      const sessionIdOrCode = req.params.id;
+      const { token, role, name, story, category, emotion, gender } = req.body || {};
+
+      if (!story || typeof story !== 'string' || story.trim().length < 20) {
+        res.status(400).json({
+          error: 'INVALID_STORY',
+          message: 'یکم بیشتر برامون تعریف کن تا بهتر بفهمیم 🤍 (حداقل ۲۰ کاراکتر)',
+        });
+        return;
+      }
+
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
+
+      if (!session) {
+        res.status(404).json({
+          error: 'SESSION_NOT_FOUND',
+          message: 'جلسه مورد نظر پیدا نشد.',
+        });
+        return;
+      }
+
+      if (session.expiresAt < Date.now()) {
+        res.status(410).json({
+          error: 'SESSION_EXPIRED',
+          message: 'این جلسه دیگه فعال نیست 🤍',
+        });
+        return;
+      }
+
+      const now = Date.now();
+      let targetRole: 'participantA' | 'participantB' | null = null;
+
+      if (token) {
+        if (session.participantA.token === token || role === 'participantA') {
+          targetRole = 'participantA';
+        } else if (session.participantB?.token === token || role === 'participantB') {
+          targetRole = 'participantB';
+        }
+      } else if (role === 'participantA') {
+        targetRole = 'participantA';
+      } else if (role === 'participantB') {
+        targetRole = 'participantB';
+      }
+
+      if (!targetRole) {
+        res.status(401).json({
+          error: 'UNAUTHORIZED',
+          message: 'دسترسی غیرمجاز به این جلسه.',
+        });
+        return;
+      }
+
+      if (targetRole === 'participantA') {
+        if (name && typeof name === 'string' && name.trim()) {
+          session.participantA.name = name.trim();
+        }
+        session.participantA.story = story.trim();
+        session.participantA.category = category || session.participantA.category || null;
+        session.participantA.emotion = emotion || session.participantA.emotion || null;
+        session.participantA.gender = gender || session.participantA.gender || null;
+        session.participantA.completed = true;
+        session.participantA.completedAt = now;
+      } else {
+        if (!session.participantB) {
+          session.participantB = {
+            id: 'pB',
+            name: (name && typeof name === 'string' && name.trim()) || 'همراه',
+            token: token || generateSecureToken(),
+            completed: true,
+            completedAt: now,
+            createdAt: now,
+          };
+        } else {
+          if (name && typeof name === 'string' && name.trim()) {
+            session.participantB.name = name.trim();
+          }
+          session.participantB.completed = true;
+          session.participantB.completedAt = now;
+        }
+        session.participantB.story = story.trim();
+        session.participantB.category = category || null;
+        session.participantB.emotion = emotion || null;
+        session.participantB.gender = gender || null;
+      }
+
+      session.updatedAt = now;
+
+      // Update session status
+      const isACompleted = Boolean(session.participantA.completed);
+      const isBCompleted = Boolean(session.participantB?.completed);
+
+      if (isACompleted && isBCompleted) {
+        session.status = 'ready_for_analysis';
+      } else if (isACompleted) {
+        session.status = 'participant_a_completed';
+      } else if (isBCompleted) {
+        session.status = 'participant_b_completed';
+      }
+
+      res.json({
+        success: true,
+        session: sanitizeSessionForPublic(session, targetRole),
+      });
+    } catch (error: any) {
+      console.error('Error submitting couple story:', error);
+      res.status(500).json({
+        error: 'SUBMIT_FAILED',
+        message: 'خطا در ثبت دیدگاه. لطفاً دوباره تلاش کنید.',
+      });
+    }
+  });
+
+  // 5. Leave / Delete Couple Session
+  app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
+    try {
+      const sessionIdOrCode = req.params.id;
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+
+      const session = coupleSessions.get(sessionId);
+      if (session) {
+        joinCodeToSessionId.delete(session.joinCode.toUpperCase());
+        coupleSessions.delete(sessionId);
+      }
+
+      res.json({ success: true, message: 'از جلسه خارج شدید.' });
+    } catch (error: any) {
+      console.error('Error leaving couple session:', error);
+      res.status(500).json({ error: 'LEAVE_FAILED', message: 'خطا در خروج از جلسه.' });
+    }
+  });
+
   // Vite middleware in dev / Static files in prod
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({

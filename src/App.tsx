@@ -12,7 +12,11 @@ import { InputStoryView } from './views/InputStoryView';
 import { LoadingAIView } from './views/LoadingAIView';
 import { AnalysisResultView } from './views/AnalysisResultView';
 import { SuggestedResponseView } from './views/SuggestedResponseView';
+import { CoupleCreateView } from './views/CoupleCreateView';
 import { CoupleInviteView } from './views/CoupleInviteView';
+import { CoupleJoinView } from './views/CoupleJoinView';
+import { CoupleStoryView } from './views/CoupleStoryView';
+import { CoupleWaitingView } from './views/CoupleWaitingView';
 import { CoupleComparisonView } from './views/CoupleComparisonView';
 import { EndingView } from './views/EndingView';
 import { HistoryView } from './views/HistoryView';
@@ -25,9 +29,16 @@ import {
   ConflictAnalysisResult,
   SavedConflictRecord,
   ResponseTone,
+  CoupleSessionPublicState,
+  LocalCoupleSessionAuth,
 } from './types';
 import { DEFAULT_ANALYSIS_RESULT } from './data/mockData';
 import { analyzeConflict } from './services/analysisService';
+import {
+  getActiveSessionAuth,
+  getCoupleSessionStatus,
+  clearActiveSessionAuth,
+} from './services/coupleService';
 import {
   getHistory,
   saveConflictToHistory,
@@ -53,15 +64,60 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isAILoadingDone, setIsAILoadingDone] = useState(false);
 
+  // Couple Session States (Step 5)
+  const [coupleSession, setCoupleSession] = useState<CoupleSessionPublicState | null>(null);
+  const [coupleAuth, setCoupleAuth] = useState<LocalCoupleSessionAuth | null>(null);
+  const [urlJoinCode, setUrlJoinCode] = useState<string>('');
+
   // Modals & Toasts
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [aboutModalTab, setAboutModalTab] = useState<'how-it-works' | 'about-us' | 'privacy'>('how-it-works');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Load history from localStorage on initial render
+  // Load history & check URL parameters on initial render
   useEffect(() => {
     const saved = getHistory();
     setHistoryItems(saved);
+
+    // 1. Check URL for join code: ?join=CODE or ?code=CODE or /join/CODE
+    if (typeof window !== 'undefined') {
+      const searchParams = new URLSearchParams(window.location.search);
+      let code = searchParams.get('join') || searchParams.get('code') || '';
+
+      if (!code && window.location.pathname.startsWith('/join/')) {
+        const parts = window.location.pathname.split('/');
+        code = parts[parts.length - 1] || '';
+      }
+
+      if (code) {
+        setUrlJoinCode(code.toUpperCase());
+        setCurrentView('couple-join');
+        return;
+      }
+
+      // 2. Check for active session in storage
+      const cachedAuth = getActiveSessionAuth();
+      if (cachedAuth) {
+        setCoupleAuth(cachedAuth);
+        getCoupleSessionStatus(cachedAuth.sessionId, cachedAuth.token)
+          .then((latestSession) => {
+            setCoupleSession(latestSession);
+            if (cachedAuth.role === 'participantA') {
+              setCurrentView('couple-invite');
+            } else {
+              if (latestSession.isParticipantBCompleted) {
+                setCurrentView('couple-waiting');
+              } else {
+                setCurrentView('couple-story');
+              }
+            }
+          })
+          .catch((err) => {
+            console.warn('Failed to restore active session:', err);
+            clearActiveSessionAuth();
+          });
+      }
+    }
   }, []);
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -99,7 +155,12 @@ export default function App() {
     setStoryState((prev) => ({ ...prev, mode: selectedMode }));
     setAnalysisError(null);
     setIsAILoadingDone(false);
-    setCurrentView('input-story');
+
+    if (selectedMode === 'couple') {
+      setCurrentView('couple-create');
+    } else {
+      setCurrentView('input-story');
+    }
   };
 
   const handleModeSelect = (selectedMode: AnalysisMode) => {
@@ -107,7 +168,12 @@ export default function App() {
     setStoryState((prev) => ({ ...prev, mode: selectedMode }));
     setAnalysisError(null);
     setIsAILoadingDone(false);
-    setCurrentView('input-story');
+
+    if (selectedMode === 'couple') {
+      setCurrentView('couple-create');
+    } else {
+      setCurrentView('input-story');
+    }
   };
 
   const handleStorySubmit = async (state: StoryInputState) => {
@@ -151,11 +217,47 @@ export default function App() {
       return;
     }
     if (mode === 'couple') {
-      setCurrentView('couple-invite');
+      setCurrentView('couple-create');
     } else {
       setCurrentView('analysis-result');
     }
   }, [analysisError, mode]);
+
+  // Couple Session Events
+  const handleCoupleSessionCreated = (session: CoupleSessionPublicState, auth: LocalCoupleSessionAuth) => {
+    setCoupleSession(session);
+    setCoupleAuth(auth);
+    setMode('couple');
+    setCurrentView('couple-invite');
+  };
+
+  const handleCoupleJoined = (session: CoupleSessionPublicState, auth: LocalCoupleSessionAuth) => {
+    setCoupleSession(session);
+    setCoupleAuth(auth);
+    setMode('couple');
+    if (session.isParticipantBCompleted) {
+      setCurrentView('couple-waiting');
+    } else {
+      setCurrentView('couple-story');
+    }
+  };
+
+  const handleCoupleStorySubmitted = (session: CoupleSessionPublicState) => {
+    setCoupleSession(session);
+    if (coupleAuth?.role === 'participantA') {
+      setCurrentView('couple-invite');
+    } else {
+      setCurrentView('couple-waiting');
+    }
+  };
+
+  const handleLeaveCoupleSession = () => {
+    clearActiveSessionAuth();
+    setCoupleSession(null);
+    setCoupleAuth(null);
+    setUrlJoinCode('');
+    setCurrentView('landing');
+  };
 
   const handleSelectHistoryItem = (item: SavedConflictRecord) => {
     setMode(item.mode);
@@ -260,7 +362,7 @@ export default function App() {
                     data={analysisResult}
                     mode={mode}
                     onProceedToResponse={() => setCurrentView('suggested-response')}
-                    onProceedToCouple={() => setCurrentView('couple-comparison')}
+                    onProceedToCouple={() => setCurrentView('couple-create')}
                     onReanalyze={() => setCurrentView('input-story')}
                     onBack={() => setCurrentView('input-story')}
                   />
@@ -272,7 +374,7 @@ export default function App() {
                     data={analysisResult}
                     mode={mode}
                     onProceedToEnding={() => setCurrentView('ending')}
-                    onProceedToCoupleInvite={() => setCurrentView('couple-invite')}
+                    onProceedToCoupleInvite={() => setCurrentView('couple-create')}
                     onReanalyze={() => setCurrentView('input-story')}
                     onBack={() => setCurrentView('analysis-result')}
                     onNotify={addToast}
@@ -280,16 +382,69 @@ export default function App() {
                   />
                 )}
 
-                {/* Page 7: Couple Invite */}
-                {currentView === 'couple-invite' && (
-                  <CoupleInviteView
-                    onPartnerJoined={() => setCurrentView('couple-comparison')}
-                    onBack={() => setCurrentView('analysis-result')}
+                {/* Couple Step: Create Couple Session */}
+                {currentView === 'couple-create' && (
+                  <CoupleCreateView
+                    initialStoryState={storyState}
+                    onSessionCreated={handleCoupleSessionCreated}
+                    onGoToJoinWithCode={() => setCurrentView('couple-join')}
+                    onBack={() => setCurrentView('select-mode')}
                     onNotify={addToast}
                   />
                 )}
 
-                {/* Page 8: Couple Comparison */}
+                {/* Couple Step: Invite View for Participant A */}
+                {currentView === 'couple-invite' && coupleSession && coupleAuth && (
+                  <CoupleInviteView
+                    session={coupleSession}
+                    auth={coupleAuth}
+                    onSessionUpdated={setCoupleSession}
+                    onOpenStoryEditor={() => setCurrentView('couple-story')}
+                    onBack={() => setCurrentView('landing')}
+                    onLeaveSession={handleLeaveCoupleSession}
+                    onNotify={addToast}
+                  />
+                )}
+
+                {/* Couple Step: Join View for Participant B */}
+                {currentView === 'couple-join' && (
+                  <CoupleJoinView
+                    initialCode={urlJoinCode}
+                    onJoined={handleCoupleJoined}
+                    onBack={() => setCurrentView('landing')}
+                    onNotify={addToast}
+                  />
+                )}
+
+                {/* Couple Step: Story Submission for Participant B (or A) */}
+                {currentView === 'couple-story' && coupleSession && coupleAuth && (
+                  <CoupleStoryView
+                    session={coupleSession}
+                    auth={coupleAuth}
+                    onStorySubmitted={handleCoupleStorySubmitted}
+                    onBack={() => {
+                      if (coupleAuth.role === 'participantA') {
+                        setCurrentView('couple-invite');
+                      } else {
+                        setCurrentView('couple-join');
+                      }
+                    }}
+                    onNotify={addToast}
+                  />
+                )}
+
+                {/* Couple Step: Waiting & Real-time Status */}
+                {currentView === 'couple-waiting' && coupleSession && coupleAuth && (
+                  <CoupleWaitingView
+                    session={coupleSession}
+                    auth={coupleAuth}
+                    onSessionUpdated={setCoupleSession}
+                    onLeaveSession={handleLeaveCoupleSession}
+                    onNotify={addToast}
+                  />
+                )}
+
+                {/* Couple Comparison (Reserved for Step 6) */}
                 {currentView === 'couple-comparison' && (
                   <CoupleComparisonView
                     data={analysisResult}

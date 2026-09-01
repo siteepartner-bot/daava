@@ -5,7 +5,11 @@ export type AppView =
   | 'loading-ai'
   | 'analysis-result'
   | 'suggested-response'
+  | 'couple-create'
   | 'couple-invite'
+  | 'couple-join'
+  | 'couple-story'
+  | 'couple-waiting'
   | 'couple-comparison'
   | 'ending'
   | 'history'
@@ -125,4 +129,41 @@ export interface SavedConflictRecord {
 // Backward compatibility alias
 export type AnalysisResultData = ConflictAnalysisResult;
 export type HistoryItem = SavedConflictRecord;
+
+// Couple Session Management Types (Step 5)
+export type CoupleSessionStatus =
+  | 'waiting'
+  | 'participant_a_completed'
+  | 'participant_b_completed'
+  | 'ready_for_analysis'
+  | 'expired';
+
+export interface CoupleParticipantSummary {
+  name: string;
+  completed: boolean;
+  completedAt?: number;
+}
+
+export interface CoupleSessionPublicState {
+  id: string;
+  joinCode: string;
+  status: CoupleSessionStatus;
+  createdAt: number;
+  expiresAt: number;
+  participantA: CoupleParticipantSummary;
+  participantB?: CoupleParticipantSummary | null;
+  isParticipantACompleted: boolean;
+  isParticipantBCompleted: boolean;
+  isReadyForAnalysis: boolean;
+  yourRole?: 'participantA' | 'participantB';
+  yourCompleted?: boolean;
+}
+
+export interface LocalCoupleSessionAuth {
+  sessionId: string;
+  joinCode: string;
+  role: 'participantA' | 'participantB';
+  token: string;
+  name: string;
+}
 
