@@ -33,15 +33,20 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
   const emotion: EmotionType = input.emotion || detectEmotionFromText(text);
 
   const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
+  let savedWorkerUrl = '';
+  if (typeof window !== 'undefined') {
+    savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
+  }
+
   const metaEnv = (import.meta as any)?.env;
-  const configuredWorker = metaEnv?.VITE_WORKER_API_URL;
+  const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
   // Determine primary and fallback endpoints
   let primaryEndpoint = '/api/analyze';
   let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
 
   if (configuredWorker) {
-    primaryEndpoint = configuredWorker;
+    primaryEndpoint = configuredWorker.trim();
     fallbackEndpoint = CLOUDFLARE_WORKER_URL;
   } else if (
     typeof window !== 'undefined' &&

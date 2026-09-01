@@ -1,14 +1,7 @@
 /**
  * Cloudflare Worker for Gemini Conflict Analyzer
  *
- * How to deploy in 2 minutes:
- * 1. Go to Cloudflare Dashboard -> Workers & Pages -> Create Application -> Create Worker
- * 2. Paste this entire code into Worker Editor and click "Deploy"
- * 3. In Worker Settings -> Variables -> Add Environment Variable:
- *    Variable name: GEMINI_API_KEY
- *    Value: (Your Google AI Studio API Key)
- * 4. Copy your worker URL (e.g., https://my-worker.subdomain.workers.dev)
- * 5. In your frontend repository, set VITE_WORKER_API_URL="https://my-worker.subdomain.workers.dev/api/analyze"
+ * Updated with latest Gemini 3.5 & 3.6 Models
  */
 
 export default {
@@ -27,12 +20,13 @@ export default {
     const url = new URL(request.url);
 
     // Health check endpoint
-    if (request.method === 'GET' || url.pathname === '/api/health' || url.pathname === '/') {
+    if (request.method === 'GET' || url.pathname === '/api/health' || (request.method === 'GET' && url.pathname === '/')) {
       return new Response(
         JSON.stringify({
           status: 'ok',
           service: 'Gemini Conflict Analyzer Worker',
           hasApiKey: Boolean(env?.GEMINI_API_KEY),
+          timestamp: new Date().toISOString(),
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -137,7 +131,12 @@ ${emotion || 'مشخص نشده'}
 
 لطفاً خروجی را دقیقاً در قالب JSON معتبر تولید کن.`;
 
-        const candidateModels = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+        // Models supported on Google Gemini API v1beta
+        const candidateModels = [
+          'gemini-3.5-flash',
+          'gemini-3.6-flash',
+          'gemini-3.5-flash-lite',
+        ];
         let parsedResult = null;
         let lastError = null;
 
@@ -182,7 +181,7 @@ ${emotion || 'مشخص نشده'}
           return new Response(
             JSON.stringify({
               error: 'AI_FAILED',
-              message: 'خطا در دریافت پاسخ از هوش مصنوعی.',
+              message: 'خطا در دریافت پاسخ از هوش مصنوعی جمینای.',
               detail: lastError?.message,
             }),
             { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
