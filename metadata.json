@@ -1,0 +1,6 @@
+{
+  "name": "آرومش کن",
+  "description": "دستیار هوشمند برای درک احساسات، حل سوءتفاهم‌ها و گفت‌وگوهای آرام در زمان اختلافات و دعواها",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
