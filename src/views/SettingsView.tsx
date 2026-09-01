@@ -14,17 +14,31 @@ import {
   RefreshCw,
   Activity,
   AlertCircle,
+  User as UserIcon,
+  LogOut,
+  ChevronLeft,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
+import { User, UserStats } from '../services/authService';
 
 interface SettingsViewProps {
+  user: User | null;
+  stats?: UserStats | null;
+  onNavigateToAuth: () => void;
+  onNavigateToProfile: () => void;
+  onLogout: () => void;
   onOpenAbout: (tab?: 'how-it-works' | 'about-us' | 'privacy') => void;
   onClearAllHistory?: () => void;
   onNotify: (msg: string) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
+  user,
+  stats,
+  onNavigateToAuth,
+  onNavigateToProfile,
+  onLogout,
   onOpenAbout,
   onClearAllHistory,
   onNotify,
@@ -105,12 +119,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="pb-4 border-b border-purple-100">
         <h2 className="text-xl sm:text-2xl font-extrabold text-[#2D2A32] flex items-center gap-2">
           <Settings className="w-6 h-6 text-[#7E57C2]" />
-          <span>تنظیمات و زیرساخت ارتباطی</span>
+          <span>تنظیمات و حساب کاربری</span>
         </h2>
         <p className="text-xs sm:text-sm text-[#64748B] mt-1">
-          مدیریت اتصال ورکر هوش مصنوعی جمینای، حریم خصوصی و ذخیره‌سازی
+          مدیریت حساب کاربری، اتصال ورکر هوش مصنوعی، حریم خصوصی و ذخیره‌سازی
         </p>
       </div>
+
+      {/* Account Status Card */}
+      {user ? (
+        <Card className="p-5 bg-gradient-to-br from-indigo-50/80 via-white to-purple-50/50 border-indigo-200/80 shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-purple-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
+                {user.name ? user.name.charAt(0).toUpperCase() : '👤'}
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-800">{user.name}</h3>
+                <p className="text-xs text-slate-500 font-mono" dir="ltr">
+                  {user.email}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={onNavigateToProfile}
+              className="px-3.5 py-2 bg-indigo-600 text-white text-xs font-semibold rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-1 shadow-xs"
+            >
+              <span>پروفایل من</span>
+              <ChevronLeft size={16} />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between pt-3 border-t border-indigo-100/80 text-xs text-slate-600">
+            <span>
+              تحلیل‌های شخصی: <strong className="text-indigo-600">{stats?.personalAnalysesCount ?? 0}</strong>
+            </span>
+            <span>
+              جلسات دونفره: <strong className="text-purple-600">{stats?.coupleSessionsCount ?? 0}</strong>
+            </span>
+            <button
+              onClick={onLogout}
+              className="text-amber-700 hover:text-amber-800 font-medium flex items-center gap-1 hover:underline"
+            >
+              <LogOut size={13} />
+              <span>خروج از حساب</span>
+            </button>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-5 bg-gradient-to-br from-purple-50 via-white to-pink-50/40 border-purple-200 shadow-sm space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0">
+              <UserIcon size={20} />
+            </div>
+            <div className="space-y-1 flex-1">
+              <h3 className="text-sm font-bold text-slate-800">ورود یا ساخت حساب کاربری</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                با ایجاد حساب کاربری، تمامی تحلیلهای شما بهصورت دائمی و امن ذخیره میشوند و در هر دستگاهی قابل دسترسی خواهند بود.
+              </p>
+            </div>
+          </div>
+
+          <Button
+            onClick={onNavigateToAuth}
+            variant="primary"
+            size="sm"
+            className="w-full mt-2"
+          >
+            ورود / ثبت‌نام در حساب
+          </Button>
+        </Card>
+      )}
 
       {/* Worker Connection Card */}
       <Card className="p-5 bg-white border-purple-200 shadow-sm space-y-4">

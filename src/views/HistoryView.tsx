@@ -19,6 +19,8 @@ import { SavedConflictRecord } from '../types';
 
 interface HistoryViewProps {
   historyItems: SavedConflictRecord[];
+  isGuest?: boolean;
+  onNavigateToAuth?: () => void;
   onSelectHistoryItem: (item: SavedConflictRecord) => void;
   onDeleteItem: (id: string) => void;
   onStartNew: () => void;
@@ -27,6 +29,8 @@ interface HistoryViewProps {
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   historyItems,
+  isGuest = false,
+  onNavigateToAuth,
   onSelectHistoryItem,
   onDeleteItem,
   onStartNew,
@@ -65,6 +69,26 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           تحلیل جدید
         </Button>
       </div>
+
+      {/* Guest Mode Banner */}
+      {isGuest && (
+        <Card className="p-4 bg-gradient-to-r from-amber-50/90 via-orange-50/80 to-purple-50/50 border-amber-200 text-amber-900 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-medium text-center sm:text-right">
+            <span className="text-xl">🤍</span>
+            <span>برای ذخیره دائمی این تحلیل وارد حسابت شو 🤍</span>
+          </div>
+          {onNavigateToAuth && (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={onNavigateToAuth}
+              className="shrink-0 text-xs py-1.5 px-3 shadow-xs"
+            >
+              ورود / ثبت‌نام
+            </Button>
+          )}
+        </Card>
+      )}
 
       {/* History Items List or Empty State */}
       {historyItems.length === 0 ? (

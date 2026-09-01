@@ -21,6 +21,8 @@ import { CoupleComparisonView } from './views/CoupleComparisonView';
 import { EndingView } from './views/EndingView';
 import { HistoryView } from './views/HistoryView';
 import { SettingsView } from './views/SettingsView';
+import { AuthView } from './views/AuthView';
+import { ProfileView } from './views/ProfileView';
 
 import {
   AppView,
@@ -46,6 +48,16 @@ import {
   deleteHistoryItem,
   clearAllHistory,
 } from './utils/storage';
+import {
+  User,
+  UserStats,
+  fetchCurrentUserProfile,
+  getUserHistoryFromApi,
+  saveAnalysisToApi,
+  syncLocalStorageHistoryOnce,
+  deleteAnalysisFromApi,
+  clearUserHistoryFromApi,
+} from './services/authService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('landing');
@@ -74,12 +86,37 @@ export default function App() {
   const [aboutModalTab, setAboutModalTab] = useState<'how-it-works' | 'about-us' | 'privacy'>('how-it-works');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // Load history & check URL parameters on initial render
-  useEffect(() => {
-    const saved = getHistory();
-    setHistoryItems(saved);
+  // User & Auth state
+  const [user, setUser] = useState<User | null>(null);
+  const [userStats, setUserStats] = useState<UserStats | null>(null);
 
-    // 1. Check URL for join code: ?join=CODE or ?code=CODE or /join/CODE
+  // Load history & check user session on initial render
+  useEffect(() => {
+    // 1. Initial local history fallback
+    const savedLocal = getHistory();
+    setHistoryItems(savedLocal);
+
+    // 2. Fetch authenticated user profile if token exists
+    fetchCurrentUserProfile()
+      .then(async (res) => {
+        if (res.user) {
+          setUser(res.user);
+          setUserStats(res.stats || null);
+          // Sync offline LocalStorage history to database once
+          const dbHistory = await syncLocalStorageHistoryOnce();
+          if (dbHistory) {
+            setHistoryItems(dbHistory);
+          } else {
+            const apiHistory = await getUserHistoryFromApi();
+            if (apiHistory) setHistoryItems(apiHistory);
+          }
+        }
+      })
+      .catch((err) => {
+        console.log('No active auth session:', err);
+      });
+
+    // 3. Check URL for join code: ?join=CODE or ?code=CODE or /join/CODE
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
       let code = searchParams.get('join') || searchParams.get('code') || '';
@@ -95,7 +132,7 @@ export default function App() {
         return;
       }
 
-      // 2. Check for active session in storage
+      // 4. Check for active couple session in storage
       const cachedAuth = getActiveSessionAuth();
       if (cachedAuth) {
         setCoupleAuth(cachedAuth);
@@ -194,7 +231,7 @@ export default function App() {
 
       setAnalysisResult(result);
 
-      // Save to localStorage history only upon successful analysis
+      // Save to localStorage history
       const updatedHistory = saveConflictToHistory(
         state.mode,
         state.storyText,
@@ -204,6 +241,17 @@ export default function App() {
         state.gender
       );
       setHistoryItems(updatedHistory);
+
+      // Save to backend database if user is authenticated
+      if (user) {
+        const latestSavedRecord = updatedHistory[0];
+        if (latestSavedRecord) {
+          saveAnalysisToApi(latestSavedRecord).then((apiHistory) => {
+            if (apiHistory) setHistoryItems(apiHistory);
+          });
+        }
+      }
+
       setIsAILoadingDone(true);
     } catch (err: any) {
       console.error('Error during conflict analysis:', err);
@@ -275,11 +323,21 @@ export default function App() {
   const handleDeleteHistoryItem = (id: string) => {
     const updated = deleteHistoryItem(id);
     setHistoryItems(updated);
+    if (user) {
+      deleteAnalysisFromApi(id).then((apiHistory) => {
+        if (apiHistory) setHistoryItems(apiHistory);
+      });
+    }
   };
 
   const handleClearAllHistory = () => {
     clearAllHistory();
     setHistoryItems([]);
+    if (user) {
+      clearUserHistoryFromApi().then(() => {
+        setHistoryItems([]);
+      });
+    }
   };
 
   return (
@@ -287,6 +345,7 @@ export default function App() {
       {/* Global Header */}
       <Header
         currentView={currentView}
+        user={user}
         onNavigate={(view) => {
           setAnalysisError(null);
           setCurrentView(view);
@@ -361,6 +420,8 @@ export default function App() {
                   <AnalysisResultView
                     data={analysisResult}
                     mode={mode}
+                    isGuest={!user}
+                    onNavigateToAuth={() => setCurrentView('auth')}
                     onProceedToResponse={() => setCurrentView('suggested-response')}
                     onProceedToCouple={() => setCurrentView('couple-create')}
                     onReanalyze={() => setCurrentView('input-story')}
@@ -485,6 +546,8 @@ export default function App() {
                 {currentView === 'history' && (
                   <HistoryView
                     historyItems={historyItems}
+                    isGuest={!user}
+                    onNavigateToAuth={() => setCurrentView('auth')}
                     onSelectHistoryItem={handleSelectHistoryItem}
                     onDeleteItem={handleDeleteHistoryItem}
                     onStartNew={() => setCurrentView('input-story')}
@@ -495,9 +558,53 @@ export default function App() {
                 {/* Settings Tab */}
                 {currentView === 'settings' && (
                   <SettingsView
+                    user={user}
+                    stats={userStats}
+                    onNavigateToAuth={() => setCurrentView('auth')}
+                    onNavigateToProfile={() => setCurrentView('profile')}
+                    onLogout={() => {
+                      setUser(null);
+                      setUserStats(null);
+                      setHistoryItems(getHistory());
+                      setCurrentView('landing');
+                    }}
                     onOpenAbout={handleOpenAbout}
                     onClearAllHistory={handleClearAllHistory}
                     onNotify={addToast}
+                  />
+                )}
+
+                {/* Auth View (Login / Register) */}
+                {currentView === 'auth' && (
+                  <AuthView
+                    onSuccess={(loggedInUser, stats) => {
+                      setUser(loggedInUser);
+                      setUserStats(stats || null);
+                      addToast(`خوش آمدید ${loggedInUser.name} عزیز 🤍`, 'success');
+                      // Load user history from API
+                      getUserHistoryFromApi().then((apiHistory) => {
+                        if (apiHistory) setHistoryItems(apiHistory);
+                      });
+                      setCurrentView('profile');
+                    }}
+                    onBack={() => setCurrentView('settings')}
+                  />
+                )}
+
+                {/* User Profile View */}
+                {currentView === 'profile' && user && (
+                  <ProfileView
+                    user={user}
+                    stats={userStats}
+                    onUpdateUser={(updated) => setUser(updated)}
+                    onLogout={() => {
+                      setUser(null);
+                      setUserStats(null);
+                      setHistoryItems(getHistory());
+                      setCurrentView('landing');
+                    }}
+                    onBack={() => setCurrentView('settings')}
+                    addToast={addToast}
                   />
                 )}
               </>

@@ -1,11 +1,66 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
+import { db, hashPassword, UserRecord } from './server/db';
 
 dotenv.config();
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+// Rate limiting map
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+
+function rateLimiter(maxRequests: number, windowMs: number) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const clientIp =
+      (req.headers['x-forwarded-for'] as string)?.split(',')[0] ||
+      req.socket.remoteAddress ||
+      'unknown';
+    const now = Date.now();
+    let record = rateLimitMap.get(clientIp);
+
+    if (!record || now > record.resetAt) {
+      record = { count: 1, resetAt: now + windowMs };
+      rateLimitMap.set(clientIp, record);
+      return next();
+    }
+
+    if (record.count >= maxRequests) {
+      res.status(429).json({
+        error: 'RATE_LIMIT_EXCEEDED',
+        message: 'تعداد درخواست‌های شما بیش از حد مجاز است. لطفاً چند لحظه صبر کنید 🤍',
+      });
+      return;
+    }
+
+    record.count++;
+    next();
+  };
+}
+
+// Authentication middleware
+function getAuthUserFromHeader(req: Request): UserRecord | null {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (!token) return null;
+  const session = db.findSession(token);
+  if (!session) return null;
+  return db.findUserById(session.userId) || null;
+}
+
+function authenticateToken(req: Request, res: Response, next: NextFunction) {
+  const user = getAuthUserFromHeader(req);
+  if (!user) {
+    res.status(401).json({
+      error: 'UNAUTHORIZED',
+      message: 'برای دسترسی به این بخش، ابتدا وارد حسابت شو 🤍',
+    });
+    return;
+  }
+  (req as any).user = user;
+  next();
+}
 
 function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -257,6 +312,308 @@ async function startServer() {
       status: 'ok',
       hasApiKey: Boolean(process.env.GEMINI_API_KEY),
     });
+  });
+
+  // --- Rate Limiting for sensitive routes ---
+  app.use('/api/auth', rateLimiter(20, 60 * 1000));
+  app.use('/api/analyze', rateLimiter(20, 60 * 1000));
+  app.use('/api/couple/create', rateLimiter(20, 60 * 1000));
+
+  // --- Auth Endpoints ---
+
+  // 1. Register
+  app.post('/api/auth/register', (req: Request, res: Response): void => {
+    try {
+      const { name, email, password } = req.body || {};
+
+      if (!name || typeof name !== 'string' || name.trim().length < 2) {
+        res.status(400).json({
+          error: 'INVALID_NAME',
+          message: 'لطفاً نام یا لقب خود را وارد کنید.',
+        });
+        return;
+      }
+
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        res.status(400).json({
+          error: 'INVALID_EMAIL',
+          message: 'ایمیل واردشده درست نیست.',
+        });
+        return;
+      }
+
+      if (!password || typeof password !== 'string' || password.length < 8) {
+        res.status(400).json({
+          error: 'INVALID_PASSWORD',
+          message: 'رمز عبور باید حداقل ۸ کاراکتر باشد.',
+        });
+        return;
+      }
+
+      const user = db.createUser(name, cleanEmail, password);
+      const session = db.createAuthSession(user.id);
+
+      const personalAnalyses = db.getUserAnalyses(user.id);
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          createdAt: user.createdAt,
+        },
+        token: session.token,
+        stats: {
+          personalAnalysesCount: personalAnalyses.length,
+          coupleSessionsCount: 0,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        error: 'REGISTER_FAILED',
+        message: error?.message || 'خطا در ثبت‌نام. لطفاً دوباره تلاش کنید.',
+      });
+    }
+  });
+
+  // 2. Login
+  app.post('/api/auth/login', (req: Request, res: Response): void => {
+    try {
+      const { email, password } = req.body || {};
+
+      const cleanEmail = (email || '').trim().toLowerCase();
+      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        res.status(400).json({
+          error: 'INVALID_EMAIL',
+          message: 'ایمیل واردشده درست نیست.',
+        });
+        return;
+      }
+
+      if (!password || typeof password !== 'string') {
+        res.status(400).json({
+          error: 'INVALID_PASSWORD',
+          message: 'لطفاً رمز عبور را وارد کنید.',
+        });
+        return;
+      }
+
+      const user = db.findUserByEmail(cleanEmail);
+      if (!user) {
+        res.status(400).json({
+          error: 'INVALID_CREDENTIALS',
+          message: 'ایمیل یا رمز عبور اشتباه است.',
+        });
+        return;
+      }
+
+      const { hash } = hashPassword(password, user.salt);
+      if (hash !== user.passwordHash) {
+        res.status(400).json({
+          error: 'INVALID_CREDENTIALS',
+          message: 'ایمیل یا رمز عبور اشتباه است.',
+        });
+        return;
+      }
+
+      const session = db.createAuthSession(user.id);
+      const personalAnalyses = db.getUserAnalyses(user.id);
+
+      res.json({
+        success: true,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          createdAt: user.createdAt,
+        },
+        token: session.token,
+        stats: {
+          personalAnalysesCount: personalAnalyses.length,
+          coupleSessionsCount: 0,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        error: 'LOGIN_FAILED',
+        message: 'خطا در ورود به حساب. لطفاً دوباره تلاش کنید.',
+      });
+    }
+  });
+
+  // 3. Get Current User Profile (me)
+  app.get('/api/auth/me', authenticateToken, (req: Request, res: Response): void => {
+    const user = (req as any).user as UserRecord;
+    const personalAnalyses = db.getUserAnalyses(user.id);
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt,
+      },
+      stats: {
+        personalAnalysesCount: personalAnalyses.length,
+        coupleSessionsCount: 0,
+      },
+    });
+  });
+
+  // 4. Update Profile (Name)
+  app.post('/api/auth/profile', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      const { name } = req.body || {};
+
+      if (!name || typeof name !== 'string' || name.trim().length < 2) {
+        res.status(400).json({
+          error: 'INVALID_NAME',
+          message: 'لطفاً نام را به درستی وارد کنید.',
+        });
+        return;
+      }
+
+      const updated = db.updateUserName(user.id, name);
+      res.json({
+        success: true,
+        user: {
+          id: updated.id,
+          name: updated.name,
+          email: updated.email,
+          createdAt: updated.createdAt,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        error: 'PROFILE_UPDATE_FAILED',
+        message: error?.message || 'خطا در بروزرسانی نام.',
+      });
+    }
+  });
+
+  // 5. Delete Account
+  app.delete('/api/auth/account', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      db.deleteUser(user.id);
+      res.json({
+        success: true,
+        message: 'حساب کاربری با موفقیت حذف شد.',
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        error: 'ACCOUNT_DELETE_FAILED',
+        message: 'خطا در حذف حساب کاربری.',
+      });
+    }
+  });
+
+  // 6. Logout
+  app.post('/api/auth/logout', (req: Request, res: Response): void => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.replace(/^Bearer\s+/i, '').trim();
+    if (token) {
+      db.deleteSession(token);
+    }
+    res.json({ success: true });
+  });
+
+  // --- History Endpoints ---
+
+  // Get user history
+  app.get('/api/history', authenticateToken, (req: Request, res: Response): void => {
+    const user = (req as any).user as UserRecord;
+    const analyses = db.getUserAnalyses(user.id);
+    res.json({
+      success: true,
+      history: analyses,
+    });
+  });
+
+  // Sync client local storage history
+  app.post('/api/history/sync', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      const { items } = req.body || {};
+      const synced = db.syncLocalAnalyses(user.id, items || []);
+      res.json({
+        success: true,
+        history: synced,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        error: 'SYNC_FAILED',
+        message: 'خطا در همگام‌سازی تاریخچه.',
+      });
+    }
+  });
+
+  // Save single personal analysis
+  app.post('/api/history/save', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      const { id, story, category, emotion, gender, analysis } = req.body || {};
+
+      if (!story || !analysis) {
+        res.status(400).json({
+          error: 'INVALID_DATA',
+          message: 'اطلاعات تحلیل ناقص است.',
+        });
+        return;
+      }
+
+      const record = db.saveAnalysis(user.id, {
+        id,
+        story,
+        category: category || 'رابطه',
+        emotion: emotion || 'ناراحت',
+        gender,
+        analysis,
+      });
+
+      res.json({
+        success: true,
+        record,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        error: 'SAVE_FAILED',
+        message: 'خطا در ذخیره‌سازی تحلیل.',
+      });
+    }
+  });
+
+  // Delete single history item
+  app.delete('/api/history/:id', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      const id = req.params.id;
+      db.deleteAnalysis(user.id, id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({
+        error: 'DELETE_FAILED',
+        message: 'خطا در حذف تحلیل.',
+      });
+    }
+  });
+
+  // Clear all history for user
+  app.delete('/api/history/clear', authenticateToken, (req: Request, res: Response): void => {
+    try {
+      const user = (req as any).user as UserRecord;
+      db.clearUserAnalyses(user.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({
+        error: 'CLEAR_FAILED',
+        message: 'خطا در پاکسازی تاریخچه.',
+      });
+    }
   });
 
   // Main Gemini Conflict Analysis Endpoint

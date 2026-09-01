@@ -20,6 +20,8 @@ import { ConflictAnalysisResult, AnalysisMode } from '../types';
 interface AnalysisResultViewProps {
   data: ConflictAnalysisResult;
   mode: AnalysisMode;
+  isGuest?: boolean;
+  onNavigateToAuth?: () => void;
   onProceedToResponse: () => void;
   onProceedToCouple?: () => void;
   onReanalyze: () => void;
@@ -29,6 +31,8 @@ interface AnalysisResultViewProps {
 export const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({
   data,
   mode,
+  isGuest = false,
+  onNavigateToAuth,
   onProceedToResponse,
   onProceedToCouple,
   onReanalyze,
@@ -52,6 +56,26 @@ export const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Guest Save Prompt */}
+      {isGuest && (
+        <Card className="p-4 bg-gradient-to-r from-amber-50 via-orange-50/80 to-purple-50/50 border-amber-200 text-amber-900 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2.5 text-xs sm:text-sm font-medium text-center sm:text-right">
+            <span className="text-xl">🤍</span>
+            <span>برای ذخیره دائمی این تحلیل وارد حسابت شو 🤍</span>
+          </div>
+          {onNavigateToAuth && (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={onNavigateToAuth}
+              className="shrink-0 text-xs py-1.5 px-3 shadow-xs"
+            >
+              ورود / ثبت‌نام
+            </Button>
+          )}
+        </Card>
+      )}
 
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-purple-50 via-pink-50/40 to-purple-50 rounded-3xl p-6 md:p-8 border border-purple-200/80 text-center relative overflow-hidden soft-shadow">
