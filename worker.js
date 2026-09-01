@@ -513,6 +513,64 @@ export default {
 ۸. هدف تحلیل برنده کردن هیچ‌کس نیست، بلکه هموار کردن مسیر گفتگو و درک متقابل است.
 ۹. خروجی باید دقیقاً و فقط طبق JSON Schema تعریف‌شده باشد.`;
 
+          const WORKER_SHARED_ANALYSIS_SCHEMA = {
+            type: 'OBJECT',
+            properties: {
+              overallSummary: { type: 'STRING', description: 'خلاصه اصل ماجرا و اتفاقی که رخ داده به صورت کاملاً بی‌طرفانه' },
+              commonGround: { type: 'ARRAY', items: { type: 'STRING' }, description: 'لیست ۳ تا ۴ مورد از نقاط مشترک و خواسته یا دغدغه مشترک هر دو طرف' },
+              mainDifferences: {
+                type: 'ARRAY',
+                items: {
+                  type: 'OBJECT',
+                  properties: {
+                    topic: { type: 'STRING', description: 'موضوع یا محور اختلاف' },
+                    participantA: { type: 'STRING', description: 'دیدگاه و برداشت نفر اول' },
+                    participantB: { type: 'STRING', description: 'دیدگاه و برداشت نفر دوم' },
+                  },
+                  required: ['topic', 'participantA', 'participantB'],
+                },
+                description: 'اختلاف دیدگاه‌ها به تفکیک برداشت نفر اول و نفر دوم',
+              },
+              possibleMisunderstandings: { type: 'ARRAY', items: { type: 'STRING' }, description: 'لیست سوءتفاهم‌های احتمالی' },
+              participantA: {
+                type: 'OBJECT',
+                properties: {
+                  emotion: { type: 'STRING', description: 'احساس شناسایی‌شده نفر اول' },
+                  possibleNeed: { type: 'STRING', description: 'نیاز عاطفی یا روانی احتمالی نفر اول' },
+                  behaviorToImprove: { type: 'STRING', description: 'رفتار یا واکنشی که برای نفر اول قابلیت بهبود دارد' },
+                },
+                required: ['emotion', 'possibleNeed', 'behaviorToImprove'],
+              },
+              participantB: {
+                type: 'OBJECT',
+                properties: {
+                  emotion: { type: 'STRING', description: 'احساس شناسایی‌شده نفر دوم' },
+                  possibleNeed: { type: 'STRING', description: 'نیاز عاطفی یا روانی احتمالی نفر دوم' },
+                  behaviorToImprove: { type: 'STRING', description: 'رفتار یا واکنشی که برای نفر دوم قابلیت بهبود دارد' },
+                },
+                required: ['emotion', 'possibleNeed', 'behaviorToImprove'],
+              },
+              escalationPattern: { type: 'ARRAY', items: { type: 'STRING' }, description: 'زنجیره ۴ تا ۶ مرحله‌ای تشدید دعوا' },
+              sharedNeed: { type: 'STRING', description: 'نیاز مشترک و بنیادین هر دو نفر' },
+              fairAssessment: { type: 'STRING', description: 'بررسی منصفانه و کاملاً بی‌طرفانه' },
+              nextStep: { type: 'STRING', description: 'پیشنهاد و اقدام عملی بعدی' },
+              conversationStarter: { type: 'STRING', description: 'یک جمله بسیار طبیعی، ملموس و صمیمی برای شروع گفتگو' },
+            },
+            required: [
+              'overallSummary',
+              'commonGround',
+              'mainDifferences',
+              'possibleMisunderstandings',
+              'participantA',
+              'participantB',
+              'escalationPattern',
+              'sharedNeed',
+              'fairAssessment',
+              'nextStep',
+              'conversationStarter',
+            ],
+          };
+
           const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
 
           const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
@@ -529,6 +587,7 @@ export default {
                   generationConfig: {
                     temperature: 0.3,
                     responseMimeType: 'application/json',
+                    responseSchema: WORKER_SHARED_ANALYSIS_SCHEMA,
                   },
                 }),
               });
@@ -596,7 +655,7 @@ export default {
         // ---------------------------------------------------------------------------------
         // 1. REWRITE REPLY ENDPOINT (/api/rewrite-reply)
         // ---------------------------------------------------------------------------------
-        if (pathname === '/api/rewrite-reply' || body.action === 'rewrite') {
+        if (normalizedPath === '/api/rewrite-reply' || normalizedPath === '/rewrite-reply' || body.action === 'rewrite') {
           const { originalMessage, tone, userInstruction, conflictContext } = body;
 
           if (!originalMessage || typeof originalMessage !== 'string') {
@@ -705,7 +764,7 @@ export default {
         // ---------------------------------------------------------------------------------
         // 2. SUGGEST REPLIES ENDPOINT (/api/suggest-replies)
         // ---------------------------------------------------------------------------------
-        if (pathname === '/api/suggest-replies' || body.action === 'suggest_replies') {
+        if (normalizedPath === '/api/suggest-replies' || normalizedPath === '/suggest-replies' || body.action === 'suggest_replies') {
           const {
             story,
             category,

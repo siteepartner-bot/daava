@@ -27,14 +27,169 @@ interface CoupleComparisonProps {
   onCopyStarter?: (text: string) => void;
 }
 
+function normalizeAnalysisData(raw: any): CoupleSharedAnalysis | null {
+  if (!raw) return null;
+
+  let data = raw;
+  if (typeof data === 'string') {
+    try {
+      data = JSON.parse(data);
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof data !== 'object' || !data) return null;
+
+  // Unwrap nested wrappers if present
+  if (data.sharedAnalysis) data = data.sharedAnalysis;
+  else if (data.analysis) data = data.analysis;
+  else if (data.result) data = data.result;
+  else if (data.data) data = data.data;
+
+  if (typeof data !== 'object' || !data) return null;
+
+  const overallSummary =
+    data.overallSummary ||
+    data.overall_summary ||
+    data.summary ||
+    data.overview ||
+    data.description ||
+    '';
+
+  const fairAssessment =
+    data.fairAssessment ||
+    data.fair_assessment ||
+    data.impartialAssessment ||
+    data.assessment ||
+    '';
+
+  const sharedNeed =
+    data.sharedNeed ||
+    data.shared_need ||
+    data.coreNeed ||
+    data.underlyingNeed ||
+    '';
+
+  const nextStep =
+    data.nextStep ||
+    data.next_step ||
+    data.actionPlan ||
+    data.recommendation ||
+    '';
+
+  const conversationStarter =
+    data.conversationStarter ||
+    data.conversation_starter ||
+    data.starter ||
+    data.suggestedStarter ||
+    '';
+
+  const commonGround = Array.isArray(data.commonGround)
+    ? data.commonGround
+    : Array.isArray(data.common_ground)
+    ? data.common_ground
+    : [];
+
+  const possibleMisunderstandings = Array.isArray(data.possibleMisunderstandings)
+    ? data.possibleMisunderstandings
+    : Array.isArray(data.possible_misunderstandings)
+    ? data.possible_misunderstandings
+    : [];
+
+  const escalationPattern = Array.isArray(data.escalationPattern)
+    ? data.escalationPattern
+    : Array.isArray(data.escalation_pattern)
+    ? data.escalation_pattern
+    : [];
+
+  const rawDiffs =
+    data.mainDifferences ||
+    data.main_differences ||
+    data.differences ||
+    data.differencesMatrix ||
+    [];
+
+  const mainDifferences = Array.isArray(rawDiffs)
+    ? rawDiffs.map((item: any, idx: number) => {
+        if (typeof item === 'string') {
+          return {
+            topic: `نقطه اختلاف ${idx + 1}`,
+            participantA: item,
+            participantB: '',
+          };
+        }
+        if (typeof item === 'object' && item !== null) {
+          return {
+            topic: item.topic || item.subject || `مورد ${idx + 1}`,
+            participantA:
+              item.participantA ||
+              item.participant_a ||
+              item.personA ||
+              item.person_a ||
+              item.pA ||
+              '',
+            participantB:
+              item.participantB ||
+              item.participant_b ||
+              item.personB ||
+              item.person_b ||
+              item.pB ||
+              '',
+          };
+        }
+        return { topic: `مورد ${idx + 1}`, participantA: String(item), participantB: '' };
+      })
+    : [];
+
+  const parseParticipant = (pData: any) => {
+    if (!pData || typeof pData !== 'object') return undefined;
+    return {
+      emotion: pData.emotion || pData.feeling || 'نامشخص',
+      possibleNeed:
+        pData.possibleNeed || pData.possible_need || pData.need || pData.underlyingNeed || '',
+      behaviorToImprove:
+        pData.behaviorToImprove ||
+        pData.behavior_to_improve ||
+        pData.improvement ||
+        pData.growthArea ||
+        '',
+    };
+  };
+
+  const participantA = parseParticipant(
+    data.participantA || data.participant_a || data.personA || data.person_a
+  );
+
+  const participantB = parseParticipant(
+    data.participantB || data.participant_b || data.personB || data.person_b
+  );
+
+  return {
+    overallSummary,
+    fairAssessment,
+    sharedNeed,
+    nextStep,
+    conversationStarter,
+    commonGround,
+    possibleMisunderstandings,
+    escalationPattern,
+    mainDifferences,
+    participantA,
+    participantB,
+  };
+}
+
 export const CoupleComparison: React.FC<CoupleComparisonProps> = ({
-  sharedAnalysis,
+  sharedAnalysis: rawSharedAnalysis,
   participantAName = 'نفر اول',
   participantBName = 'نفر دوم',
   className = '',
   onCopyStarter,
 }) => {
   const [copiedStarter, setCopiedStarter] = useState(false);
+
+  const sharedAnalysis = normalizeAnalysisData(rawSharedAnalysis);
 
   // Fallback if legacy comparisonData is provided without sharedAnalysis
   if (!sharedAnalysis) {
