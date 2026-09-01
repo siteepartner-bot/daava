@@ -56,6 +56,27 @@ export function saveConflictToHistory(
 }
 
 /**
+ * Update an existing conflict record's analysis in localStorage
+ */
+export function updateConflictAnalysisInHistory(
+  analysis: ConflictAnalysisResult
+): SavedConflictRecord[] {
+  try {
+    const current = getHistory();
+    const updated = current.map((item) =>
+      item.analysis?.id === analysis.id || item.id === analysis.id
+        ? { ...item, analysis }
+        : item
+    );
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    return updated;
+  } catch (error) {
+    console.error('Failed to update history record in localStorage:', error);
+    return getHistory();
+  }
+}
+
+/**
  * Delete a specific conflict record by id
  */
 export function deleteHistoryItem(id: string): SavedConflictRecord[] {

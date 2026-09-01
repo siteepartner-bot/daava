@@ -137,6 +137,35 @@ const ANALYSIS_RESPONSE_SCHEMA = {
   ],
 };
 
+const SUGGEST_REPLIES_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    replies: {
+      type: Type.OBJECT,
+      properties: {
+        calm: { type: Type.STRING, description: 'پیام با لحن آرام، متین و بدون تنش' },
+        intimate: { type: Type.STRING, description: 'پیام با لحن گرم، صمیمی و محبت‌آمیز' },
+        direct: { type: Type.STRING, description: 'پیام با لحن واضح، صریح و محترمانه' },
+        emotional: { type: Type.STRING, description: 'پیام با لحن احساسی، صادقانه و آسیب‌پذیر بدون سرزنش' },
+        friendly: { type: Type.STRING, description: 'پیام با لحن خودمانی، سبک و ساده' },
+      },
+      required: ['calm', 'intimate', 'direct', 'emotional', 'friendly'],
+    },
+  },
+  required: ['replies'],
+};
+
+const REWRITE_REPLY_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    message: {
+      type: Type.STRING,
+      description: 'متن نهایی بازنویسی شده بر اساس درخواست کاربر',
+    },
+  },
+  required: ['message'],
+};
+
 async function startServer() {
   const app = express();
 
@@ -272,6 +301,223 @@ ${emotion || 'مشخص نشده'}
       res.status(500).json({
         error: 'ANALYSIS_FAILED',
         message: 'نتونستم این بار تحلیلش کنم 🤍 یه مشکل موقت پیش اومده. دوباره امتحان کن.',
+      });
+    }
+  });
+
+  // Suggest Replies Endpoint (Step 4: "چی جواب بدم؟")
+  app.post('/api/suggest-replies', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const {
+        story,
+        category,
+        emotion,
+        gender,
+        summary,
+        trigger,
+        commonNeed,
+        userEmotion,
+        possibleOtherPerspective,
+        suggestedAction,
+        tone,
+      } = req.body;
+
+      const storyContent = story || summary || '';
+      if (!storyContent || typeof storyContent !== 'string') {
+        res.status(400).json({
+          error: 'INVALID_INPUT',
+          message: 'اطلاعات ماجرا برای ساخت پاسخ یافت نشد.',
+        });
+        return;
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        res.status(500).json({
+          error: 'API_KEY_MISSING',
+          message: 'کلید ارتباط با هوش مصنوعی تنظیم نشده است.',
+        });
+        return;
+      }
+
+      const ai = getGeminiClient();
+
+      const genderLabel =
+        gender === 'female'
+          ? 'دختر (خانم)'
+          : gender === 'male'
+          ? 'پسر (آقا)'
+          : 'مشخص نشده';
+
+      const systemInstruction = `تو یک نویسنده پیام‌های متنی همدلانه و بسیار طبیعی برای انسان‌ها در موقعیت‌های دلخوری و اختلاف هستی.
+هدف تو نوشتن پیام‌هایی است که کاربر واقعاً بتواند آن‌ها را برای طرف مقابل ارسال کند تا تنش کم شود و گفت‌وگوی سالم شروع شود.
+
+قوانین مهم لحن و نگارش:
+1. پیام‌ها باید کاملاً طبیعی، روان و محاوره‌ای باشند؛ دقیقاً مثل پیامی که یک انسان در تلگرام یا واتساپ برای دیگری می‌فرستد.
+2. از ادبیات رسمی، کتابی، روانشناختی و رباتی (مثل «من عمیقاً از رفتار اخیر شما متأثر شده‌ام» یا «بیایید ارتباط مؤثری برقرار کنیم») اکیداً خودداری کن.
+3. طرف مقابل را سرزنش یا متهم نکن و هیچ توهینی به کار نبر.
+4. احساس واقعی کاربر را بی‌اهمیت یا تحقیر نکن.
+5. از عذرخواهی یا اعتراف ساختگی به کارهایی که رخ نداده پرهیز کن.
+6. پیام‌ها کوتاه، خوش‌خوان و مناسب برای ارسال در پیام‌رسان‌ها باشند.
+7. هدف اصلی: کاهش تنش، ایجاد احساس امنیت عاطفی و باز کردن راه یک گفت‌وگوی آرام و واقعی.
+
+پنج لحن مشخص:
+1. آرام (calm): متین، آرام، بدون پرخاش یا دفاع، تمرکز بر درک متقابل و آرام کردن فضا.
+2. صمیمی (intimate): گرم، محبت‌آمیز، یادآوری ارزش رابطه و ابراز علاقه.
+3. مستقیم (direct): شفاف، صریح، بدون سرزنش، روشن و محترمانه.
+4. احساسی (emotional): بیان احساسات و آسیب‌پذیری قلبی کاربر بدون متهم کردن طرف مقابل.
+5. دوستانه (friendly): خودمانی، سبک، ساده، ملایم و صمیمی.
+
+فقط و فقط یک JSON معتبر بازگردان.`;
+
+      const userPrompt = `اطلاعات زمینه اختلاف:
+- شرح ماجرا: ${storyContent}
+- خلاصه تحلیل: ${summary || 'مشخص نشده'}
+- جرقه اولیه دلخوری: ${trigger || 'مشخص نشده'}
+- احساس کاربر: ${emotion || userEmotion || 'مشخص نشده'}
+- دیدگاه احتمالی طرف مقابل: ${possibleOtherPerspective || 'مشخص نشده'}
+- نیاز مشترک: ${commonNeed || 'مشخص نشده'}
+- پیشنهاد راهکار: ${suggestedAction || 'مشخص نشده'}
+- جنسیت گوینده: ${genderLabel}
+${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیام برای لحن «${tone}» تمرکز کن.` : ''}
+
+لطفاً برای هر یک از ۵ لحن (calm, intimate, direct, emotional, friendly) یک پیام فارسی روان و کاملاً انسانی تولید کن و در قالب ساختار JSON بازگردان.`;
+
+      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+      let responseText: string | undefined;
+      let lastModelError: any = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: userPrompt,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema: SUGGEST_REPLIES_SCHEMA,
+              temperature: 0.75,
+            },
+          });
+          if (response.text) {
+            responseText = response.text;
+            break;
+          }
+        } catch (err: any) {
+          lastModelError = err;
+          console.warn(`Suggest replies: Model ${modelName} issue: ${err?.message}`);
+        }
+      }
+
+      if (!responseText) {
+        throw lastModelError || new Error('Empty response from Gemini API.');
+      }
+
+      const parsed = JSON.parse(responseText.trim());
+      res.json({
+        success: true,
+        replies: parsed.replies,
+      });
+    } catch (error: any) {
+      console.error('Error during suggest-replies:', error);
+      res.status(500).json({
+        error: 'SUGGEST_FAILED',
+        message: 'نتونستم پیام رو بسازم 🤍 یه مشکل موقت پیش اومده. دوباره امتحان کن.',
+      });
+    }
+  });
+
+  // Rewrite Reply Endpoint (Step 4: "می‌خوای تغییرش بدم؟")
+  app.post('/api/rewrite-reply', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { originalMessage, tone, userInstruction, conflictContext } = req.body;
+
+      if (!originalMessage || typeof originalMessage !== 'string') {
+        res.status(400).json({
+          error: 'INVALID_INPUT',
+          message: 'پیام اصلی برای بازنویسی وجود ندارد.',
+        });
+        return;
+      }
+
+      if (!userInstruction || typeof userInstruction !== 'string' || !userInstruction.trim()) {
+        res.status(400).json({
+          error: 'INVALID_INSTRUCTION',
+          message: 'لطفاً مشخص کن که چطور می‌خواهی پیام تغییر کند.',
+        });
+        return;
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        res.status(500).json({
+          error: 'API_KEY_MISSING',
+          message: 'کلید ارتباط با هوش مصنوعی تنظیم نشده است.',
+        });
+        return;
+      }
+
+      const ai = getGeminiClient();
+
+      const systemInstruction = `تو یک دستیار هوشمند و نویسنده پیام‌های انسانی برای کاهش تنش در روابط هستی.
+وظیفه تو این است که یک پیام متنی را دقیقاً بر اساس دستور کاربر (مثلاً کوتاه‌تر کردن، خودمونی‌تر کردن، محکم‌تر کردن یا اضافه کردن لحن عذرخواهی) بازنویسی کنی.
+
+قوانین بازنویسی:
+1. لحن باید کاملاً طبیعی، صمیمانه و متناسب با چت پیام‌رسان (تلگرام / واتساپ) باشد.
+2. از لحن خشک، رباتی، اداری یا کتابی پرهیز کن.
+3. دستور کاربر را دقیق اعمال کن (اگر گفت کوتاه‌تر، واقعاً موجز و مختصر شود؛ اگر گفت خودمونی، لحن دوستانه‌تر شود).
+4. پیام بازنویسی‌شده نباید سرزنش‌گر، تهاجمی یا بی‌احترام باشد.
+5. فقط یک پیام متنی نهایی در قالب JSON خروجی بده.`;
+
+      const userPrompt = `متن پیام فعلی:
+«${originalMessage.trim()}»
+
+لحن پایه: ${tone || 'مشخص نشده'}
+زمینه ماجرا: ${conflictContext || 'اختلاف و نیاز به آشتی و گفت‌وگو'}
+
+دستور کاربر برای تغییر پیام:
+«${userInstruction.trim()}»
+
+لطفاً پیام را با توجه دقیق به این دستور بازنویسی کن و خروجی را در قالب JSON مشخص‌شده تحویل بده.`;
+
+      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+      let responseText: string | undefined;
+      let lastModelError: any = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: userPrompt,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema: REWRITE_REPLY_SCHEMA,
+              temperature: 0.7,
+            },
+          });
+          if (response.text) {
+            responseText = response.text;
+            break;
+          }
+        } catch (err: any) {
+          lastModelError = err;
+          console.warn(`Rewrite reply: Model ${modelName} issue: ${err?.message}`);
+        }
+      }
+
+      if (!responseText) {
+        throw lastModelError || new Error('Empty response from Gemini API.');
+      }
+
+      const parsed = JSON.parse(responseText.trim());
+      res.json({
+        success: true,
+        message: parsed.message,
+      });
+    } catch (error: any) {
+      console.error('Error during rewrite-reply:', error);
+      res.status(500).json({
+        error: 'REWRITE_FAILED',
+        message: 'نتونستم پیام رو بسازم 🤍 یه مشکل موقت پیش اومده. دوباره امتحان کن.',
       });
     }
   });

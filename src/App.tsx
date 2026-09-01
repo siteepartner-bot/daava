@@ -24,12 +24,14 @@ import {
   StoryInputState,
   ConflictAnalysisResult,
   SavedConflictRecord,
+  ResponseTone,
 } from './types';
 import { DEFAULT_ANALYSIS_RESULT } from './data/mockData';
 import { analyzeConflict } from './services/analysisService';
 import {
   getHistory,
   saveConflictToHistory,
+  updateConflictAnalysisInHistory,
   deleteHistoryItem,
   clearAllHistory,
 } from './utils/storage';
@@ -80,6 +82,18 @@ export default function App() {
   };
 
   // Flow Navigation Handlers
+  const handleUpdateResponses = (updatedResponses: Record<ResponseTone, string>) => {
+    setAnalysisResult((prev) => {
+      const updated: ConflictAnalysisResult = {
+        ...prev,
+        suggestedResponses: updatedResponses,
+      };
+      const newHistory = updateConflictAnalysisInHistory(updated);
+      setHistoryItems(newHistory);
+      return updated;
+    });
+  };
+
   const handleStartAnalysis = (selectedMode: AnalysisMode) => {
     setMode(selectedMode);
     setStoryState((prev) => ({ ...prev, mode: selectedMode }));
@@ -262,6 +276,7 @@ export default function App() {
                     onReanalyze={() => setCurrentView('input-story')}
                     onBack={() => setCurrentView('analysis-result')}
                     onNotify={addToast}
+                    onUpdateResponses={handleUpdateResponses}
                   />
                 )}
 

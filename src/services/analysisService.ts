@@ -24,14 +24,7 @@ export function getPersianFormattedDate(): string {
   }
 }
 
-/**
- * Real Gemini Conflict Analyzer via Secure Server-Side Endpoint
- */
-export async function analyzeConflict(input: ConflictInput): Promise<ConflictAnalysisResult> {
-  const text = input.storyText.trim();
-  const category: ConflictCategory = input.category || detectCategoryFromText(text);
-  const emotion: EmotionType = input.emotion || detectEmotionFromText(text);
-
+function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
   const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
@@ -41,22 +34,36 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
   const metaEnv = (import.meta as any)?.env;
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
-  // Determine primary and fallback endpoints
-  let primaryEndpoint = '/api/analyze';
+  let primaryEndpoint = route;
   let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
 
   if (configuredWorker) {
-    primaryEndpoint = configuredWorker.trim();
-    fallbackEndpoint = CLOUDFLARE_WORKER_URL;
+    const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
+    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
+      ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
+      : `${cleanUrl}${route}`;
+    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
   } else if (
     typeof window !== 'undefined' &&
     (window.location.hostname.includes('workers.dev') ||
       window.location.hostname.includes('pages.dev'))
   ) {
-    // If running on Cloudflare directly
-    primaryEndpoint = CLOUDFLARE_WORKER_URL;
-    fallbackEndpoint = '/api/analyze';
+    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+    fallbackEndpoint = route;
   }
+
+  return { primary: primaryEndpoint, fallback: fallbackEndpoint };
+}
+
+/**
+ * Real Gemini Conflict Analyzer via Secure Server-Side Endpoint
+ */
+export async function analyzeConflict(input: ConflictInput): Promise<ConflictAnalysisResult> {
+  const text = input.storyText.trim();
+  const category: ConflictCategory = input.category || detectCategoryFromText(text);
+  const emotion: EmotionType = input.emotion || detectEmotionFromText(text);
+
+  const { primary: primaryEndpoint, fallback: fallbackEndpoint } = getApiEndpoints('/api/analyze');
 
   let response: Response | null = null;
   let lastError: any = null;
@@ -79,7 +86,7 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
     lastError = err;
   }
 
-  // If primary failed (e.g. 404, 502, network failure) and fallback exists, try fallback
+  // If primary failed and fallback exists, try fallback
   if ((!response || !response.ok) && fallbackEndpoint && fallbackEndpoint !== primaryEndpoint) {
     try {
       const fallbackResp = await fetch(fallbackEndpoint, {
@@ -224,6 +231,144 @@ export async function analyzeConflict(input: ConflictInput): Promise<ConflictAna
   };
 
   return normalizedResult;
+}
+
+export interface SuggestRepliesParams {
+  story?: string;
+  category?: ConflictCategory | null;
+  emotion?: EmotionType | null;
+  gender?: string | null;
+  summary?: string;
+  trigger?: string;
+  commonNeed?: string;
+  userEmotion?: string;
+  possibleOtherPerspective?: string;
+  suggestedAction?: string;
+  tone?: ResponseTone;
+}
+
+/**
+ * Step 4: Suggest 5 responses or regenerate 1 response using Gemini AI
+ */
+export async function suggestReplies(params: SuggestRepliesParams): Promise<Record<ResponseTone, string>> {
+  const { primary, fallback } = getApiEndpoints('/api/suggest-replies');
+
+  let response: Response | null = null;
+  let lastError: any = null;
+
+  try {
+    response = await fetch(primary, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+  } catch (err) {
+    lastError = err;
+  }
+
+  if ((!response || !response.ok) && fallback && fallback !== primary) {
+    try {
+      const fallbackResp = await fetch(fallback, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      });
+      if (fallbackResp.ok) {
+        response = fallbackResp;
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  if (!response) {
+    throw new Error('عدم دسترسی به اینترنت یا قطع ارتباط با سرور.');
+  }
+
+  if (!response.ok) {
+    let errorData: any = {};
+    try {
+      errorData = await response.json();
+    } catch {
+      // Ignored
+    }
+    throw new Error(errorData.message || 'نتونستم پیام رو بسازم 🤍 یه مشکل موقت پیش اومده. دوباره امتحان کن.');
+  }
+
+  const result = await response.json();
+  if (!result.success || !result.replies) {
+    throw new Error('پاسخ دریافت شده از هوش مصنوعی نامعتبر است.');
+  }
+
+  return result.replies;
+}
+
+/**
+ * Step 4: Rewrite single reply based on user instruction using Gemini AI
+ */
+export async function rewriteReply(
+  originalMessage: string,
+  tone: ResponseTone,
+  userInstruction: string,
+  conflictContext?: string
+): Promise<string> {
+  const { primary, fallback } = getApiEndpoints('/api/rewrite-reply');
+
+  let response: Response | null = null;
+  let lastError: any = null;
+
+  const payload = {
+    originalMessage,
+    tone,
+    userInstruction,
+    conflictContext,
+  };
+
+  try {
+    response = await fetch(primary, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    lastError = err;
+  }
+
+  if ((!response || !response.ok) && fallback && fallback !== primary) {
+    try {
+      const fallbackResp = await fetch(fallback, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (fallbackResp.ok) {
+        response = fallbackResp;
+      }
+    } catch {
+      // Ignored
+    }
+  }
+
+  if (!response) {
+    throw new Error('عدم دسترسی به اینترنت یا سرور.');
+  }
+
+  if (!response.ok) {
+    let errorData: any = {};
+    try {
+      errorData = await response.json();
+    } catch {
+      // Ignored
+    }
+    throw new Error(errorData.message || 'نتونستم پیام رو بسازم 🤍 یه مشکل موقت پیش اومده. دوباره امتحان کن.');
+  }
+
+  const result = await response.json();
+  if (!result.success || !result.message) {
+    throw new Error('پاسخ نامعتبر دریافت شد.');
+  }
+
+  return result.message;
 }
 
 function detectCategoryFromText(text: string): ConflictCategory {
