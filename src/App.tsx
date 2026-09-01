@@ -179,7 +179,7 @@ export default function App() {
       />
 
       {/* Main View Area */}
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 sm:px-6 pb-20 md:pb-12">
+      <main className="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 pt-4 md:pt-8 pb-28 md:pb-16">
         <AnimatePresence mode="wait">
           <motion.div
             key={analysisError ? 'error-view' : currentView}

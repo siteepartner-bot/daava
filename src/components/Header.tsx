@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { AppView } from '../types';
 import { Button } from './Button';
-import { Sparkles, History, HelpCircle, Info } from 'lucide-react';
+import { Sparkles, History, Settings, CheckCircle2, Server } from 'lucide-react';
 
 interface HeaderProps {
   currentView: AppView;
@@ -10,13 +10,22 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate, onOpenAbout }) => {
+  const [hasCustomWorker, setHasCustomWorker] = useState(false);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('custom_worker_api_url');
+    if (saved && saved.trim()) {
+      setHasCustomWorker(true);
+    }
+  }, [currentView]);
+
   return (
-    <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-[#FAF8F5]/85 border-b border-purple-100/70 transition-all">
+    <header className="sticky top-0 z-40 w-full backdrop-blur-md bg-[#FAF8F5]/90 border-b border-purple-100/80 transition-all shadow-2xs">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
         {/* Right (In RTL: Brand Logo) */}
         <button
           onClick={() => onNavigate('landing')}
-          className="flex items-center gap-2 group cursor-pointer focus:outline-none"
+          className="flex items-center gap-2.5 group cursor-pointer focus:outline-none"
         >
           <div className="w-8 h-8 rounded-2xl bg-gradient-to-tr from-purple-600 to-purple-400 flex items-center justify-center text-white shadow-xs group-hover:scale-105 transition-transform">
             <span className="text-sm">🤍</span>
@@ -27,7 +36,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate, onOpenA
         </button>
 
         {/* Left (In RTL: Navigation links & CTAs) */}
-        <div className="flex items-center gap-1.5 md:gap-4">
+        <div className="flex items-center gap-1.5 md:gap-3">
           <nav className="hidden md:flex items-center gap-1 text-sm text-[#64748B]">
             <button
               onClick={() => onOpenAbout('how-it-works')}
@@ -52,7 +61,32 @@ export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate, onOpenA
               <History className="w-4 h-4" />
               <span>تاریخچه</span>
             </button>
+            <button
+              onClick={() => onNavigate('settings')}
+              className={`px-3 py-1.5 rounded-xl transition-colors cursor-pointer flex items-center gap-1.5 ${
+                currentView === 'settings'
+                  ? 'text-[#7E57C2] bg-purple-50 font-semibold'
+                  : 'hover:text-[#7E57C2] hover:bg-purple-50/60'
+              }`}
+            >
+              <Settings className="w-4 h-4" />
+              <span>تنظیمات ورکر</span>
+            </button>
           </nav>
+
+          {/* Quick Settings Icon button on Mobile & Tablet */}
+          <button
+            onClick={() => onNavigate('settings')}
+            title="تنظیمات ورکر و هوش مصنوعی"
+            className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1 text-xs font-medium md:hidden ${
+              currentView === 'settings'
+                ? 'bg-purple-100 border-purple-300 text-purple-800'
+                : 'bg-white border-purple-100 text-slate-700 hover:bg-purple-50'
+            }`}
+          >
+            <Settings className="w-4 h-4 text-purple-600" />
+            <span className="hidden sm:inline">تنظیمات</span>
+          </button>
 
           {currentView === 'landing' ? (
             <Button
