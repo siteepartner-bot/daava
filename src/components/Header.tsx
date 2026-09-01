@@ -108,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
           {/* Quick Settings Icon button on Mobile & Tablet */}
           <button
             onClick={() => onNavigate('settings')}
-            title="تنظیمات ورکر و هوش مصنوعی"
+            title="تنظیمات برنامه"
             className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1 text-xs font-medium md:hidden ${
               currentView === 'settings'
                 ? 'bg-purple-100 border-purple-300 text-purple-800'

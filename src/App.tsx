@@ -87,6 +87,13 @@ export default function App() {
   const [aboutModalTab, setAboutModalTab] = useState<'how-it-works' | 'about-us' | 'privacy'>('how-it-works');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
+  // PWA States
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallBanner, setShowInstallBanner] = useState(false);
+  const [showIOSBanner, setShowIOSBanner] = useState(false);
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);
+  const [waitingWorker, setWaitingWorker] = useState<ServiceWorker | null>(null);
+
   // User & Auth state (synchronous initial load from local device storage)
   const [user, setUser] = useState<User | null>(() => getInitialCachedUser());
   const [userStats, setUserStats] = useState<UserStats | null>(null);
@@ -157,6 +164,103 @@ export default function App() {
       }
     }
   }, []);
+
+  // PWA Service Worker & Install Prompts Effect
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // 1. Register Service Worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then((registration) => {
+        console.log('[PWA] Service Worker registered:', registration.scope);
+
+        // Check if there is already a waiting worker (update ready)
+        if (registration.waiting) {
+          setWaitingWorker(registration.waiting);
+          setShowUpdateBanner(true);
+        }
+
+        // Listen for new installing worker
+        registration.addEventListener('updatefound', () => {
+          const newWorker = registration.installing;
+          if (newWorker) {
+            newWorker.addEventListener('statechange', () => {
+              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                setWaitingWorker(newWorker);
+                setShowUpdateBanner(true);
+              }
+            });
+          }
+        });
+      }).catch((err) => {
+        console.warn('[PWA] Service Worker registration failed:', err);
+      });
+
+      // Handle reload when new controller takes over
+      let refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!refreshing) {
+          refreshing = true;
+          window.location.reload();
+        }
+      });
+    }
+
+    // 2. Listen for standard Browser PWA installation prompt (Android / Chrome Desktop)
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      
+      const dismissedTime = localStorage.getItem('aramshkon_install_dismissed');
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      if (!dismissedTime || (Date.now() - parseInt(dismissedTime, 10)) > sevenDays) {
+        setShowInstallBanner(true);
+      }
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    // 3. Listen for iOS manual installation requirement
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+    
+    if (isIOS && !isStandalone) {
+      const dismissedTime = localStorage.getItem('aramshkon_ios_dismissed');
+      const sevenDays = 7 * 24 * 60 * 60 * 1000;
+      if (!dismissedTime || (Date.now() - parseInt(dismissedTime, 10)) > sevenDays) {
+        setShowIOSBanner(true);
+      }
+    }
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallApp = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    console.log('[PWA] User response to install prompt:', outcome);
+    setDeferredPrompt(null);
+    setShowInstallBanner(false);
+  };
+
+  const handleDismissInstall = () => {
+    localStorage.setItem('aramshkon_install_dismissed', Date.now().toString());
+    setShowInstallBanner(false);
+  };
+
+  const handleDismissIOS = () => {
+    localStorage.setItem('aramshkon_ios_dismissed', Date.now().toString());
+    setShowIOSBanner(false);
+  };
+
+  const handleUpdateApp = () => {
+    if (waitingWorker) {
+      waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+    }
+  };
 
   const addToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     const id = Date.now().toString() + Math.random().toString(36).substring(2, 5);
@@ -613,6 +717,85 @@ export default function App() {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      {/* PWA / Service Worker Update & Install Banners */}
+      {showUpdateBanner && (
+        <div className="fixed bottom-16 left-4 right-4 md:bottom-6 md:right-6 md:left-auto z-50 max-w-sm bg-[#7C3AED] text-white p-4 rounded-2xl shadow-2xl border border-purple-400 flex flex-col gap-3 animate-bounce">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xl">✨</span>
+              <p className="text-sm font-semibold">نسخه جدید آرومش کن آماده‌ست</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={handleUpdateApp}
+              className="px-4 py-1.5 bg-white text-[#7C3AED] rounded-xl text-xs font-bold hover:bg-purple-50 transition cursor-pointer"
+            >
+              به‌روزرسانی
+            </button>
+            <button
+              onClick={() => setShowUpdateBanner(false)}
+              className="px-3 py-1.5 text-purple-200 hover:text-white text-xs transition cursor-pointer"
+            >
+              بعداً
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showInstallBanner && deferredPrompt && (
+        <div className="fixed bottom-16 left-4 right-4 md:bottom-6 md:right-6 md:left-auto z-50 max-w-sm bg-white text-gray-800 p-4 rounded-2xl shadow-2xl border border-purple-100 flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-purple-50 rounded-xl text-purple-600 text-lg">
+              🤍
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-gray-900">آرومش کن رو نصب کن</h4>
+              <p className="text-xs text-gray-500 mt-0.5">برای دسترسی سریع‌تر و بدون مرورگر، برنامه رو روی گوشیت نصب کن.</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              onClick={handleInstallApp}
+              className="px-4 py-1.5 bg-[#7C3AED] text-white rounded-xl text-xs font-bold hover:bg-purple-700 transition cursor-pointer"
+            >
+              نصب برنامه
+            </button>
+            <button
+              onClick={handleDismissInstall}
+              className="px-3 py-1.5 text-gray-400 hover:text-gray-600 text-xs transition cursor-pointer"
+            >
+              بعداً
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showIOSBanner && (
+        <div className="fixed bottom-16 left-4 right-4 md:bottom-6 md:right-6 md:left-auto z-50 max-w-sm bg-white text-gray-800 p-4 rounded-2xl shadow-2xl border border-purple-100 flex flex-col gap-3">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-purple-50 rounded-xl text-purple-600 text-lg">
+              📱
+            </div>
+            <div className="flex-1">
+              <h4 className="text-sm font-bold text-gray-900">نصب آرومش کن روی آیفون</h4>
+              <div className="text-xs text-gray-600 mt-1.5 space-y-1">
+                <p className="flex items-center gap-1">۱. در پایین مرورگر دکمه اشتراک‌گذاری <span className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-bold text-gray-700">Share 📤</span> را بزنید.</p>
+                <p className="flex items-center gap-1">۲. گزینه <span className="px-1.5 py-0.5 bg-gray-100 rounded text-xs font-bold text-gray-700">Add to Home Screen ➕</span> را انتخاب کنید.</p>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center justify-end">
+            <button
+              onClick={handleDismissIOS}
+              className="px-4 py-1.5 bg-purple-50 text-[#7C3AED] rounded-xl text-xs font-bold hover:bg-purple-100 transition cursor-pointer"
+            >
+              فهمیدم
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Mobile Bottom Navigation */}
       <BottomNavigation

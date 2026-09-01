@@ -122,7 +122,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <span>تنظیمات و حساب کاربری</span>
         </h2>
         <p className="text-xs sm:text-sm text-[#64748B] mt-1">
-          مدیریت حساب کاربری، اتصال ورکر هوش مصنوعی، حریم خصوصی و ذخیره‌سازی
+          مدیریت حساب کاربری، حریم خصوصی و ذخیره‌سازی
         </p>
       </div>
 
@@ -191,91 +191,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </Button>
         </Card>
       )}
-
-      {/* Worker Connection Card */}
-      <Card className="p-5 bg-white border-purple-200 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
-              <Server className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-[#2D2A32]">
-                اتصال مستقیم به Cloudflare Worker
-              </h3>
-              <p className="text-[11px] text-[#64748B]">
-                تحلیل‌های هوش مصنوعی مستقیماً از طریق ورکر کلودفلر پردازش می‌شوند
-              </p>
-            </div>
-          </div>
-          {workerStatus === 'connected' && (
-            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800">
-              <CheckCircle className="w-3.5 h-3.5" />
-              متصل
-            </span>
-          )}
-        </div>
-
-        <div className="space-y-2">
-          <label className="block text-xs font-semibold text-slate-700">
-            آدرس (URL) ورکر جمینای:
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={workerUrl}
-              onChange={(e) => setWorkerUrl(e.target.value)}
-              placeholder="https://your-worker.workers.dev"
-              className="flex-1 px-3 py-2 text-xs md:text-sm rounded-xl border border-purple-200 focus:outline-none focus:border-purple-600 bg-slate-50 font-mono text-left"
-              dir="ltr"
-            />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => handleTestWorker()}
-              disabled={workerStatus === 'checking'}
-              icon={<RefreshCw className={`w-3.5 h-3.5 ${workerStatus === 'checking' ? 'animate-spin' : ''}`} />}
-            >
-              تست اتصال
-            </Button>
-          </div>
-        </div>
-
-        {/* Status result */}
-        {statusDetail && (
-          <div
-            className={`p-3 rounded-xl text-xs flex items-start gap-2 ${
-              workerStatus === 'connected'
-                ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                : workerStatus === 'error'
-                ? 'bg-rose-50 text-rose-900 border border-rose-200'
-                : 'bg-blue-50 text-blue-900 border border-blue-200'
-            }`}
-          >
-            {workerStatus === 'connected' ? (
-              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-            )}
-            <span className="leading-relaxed">{statusDetail}</span>
-          </div>
-        )}
-
-        <div className="flex items-center justify-between pt-2 border-t border-purple-50 text-xs">
-          <button
-            onClick={handleResetWorker}
-            className="text-purple-600 hover:text-purple-800 font-medium cursor-pointer"
-          >
-            بازنشانی به ورکر پیش‌فرض
-          </button>
-          <button
-            onClick={handleSaveWorkerUrl}
-            className="text-slate-600 hover:text-slate-900 font-medium cursor-pointer"
-          >
-            ذخیره آدرس
-          </button>
-        </div>
-      </Card>
 
       {/* Privacy Guarantee Card */}
       <Card className="bg-gradient-to-br from-purple-50 to-pink-50/60 border-purple-200/90 p-5">

@@ -60,7 +60,10 @@ export const BottomNavigation: React.FC<BottomNavigationProps> = ({
   };
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-lg border-t border-purple-100/80 px-4 py-2 shadow-lg">
+    <div 
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-lg border-t border-purple-100/80 px-4 shadow-lg"
+      style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))', paddingTop: '8px' }}
+    >
       <div className="flex items-center justify-around max-w-md mx-auto">
         {navItems.map((item) => {
           const active = isCurrentActive(item);
