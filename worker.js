@@ -83,8 +83,49 @@ async function saveUserWorker(user, env) {
   }
 }
 
+function encodeTokenWorker(user) {
+  try {
+    const payload = JSON.stringify({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      passwordHash: user.passwordHash,
+      createdAt: user.createdAt,
+    });
+    const b64 = btoa(encodeURIComponent(payload))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+    return 'token_v2_' + b64;
+  } catch {
+    return 'token_' + user.id + '_' + Date.now().toString(36);
+  }
+}
+
+function decodeTokenWorker(token) {
+  if (!token || typeof token !== 'string' || !token.startsWith('token_v2_')) return null;
+  try {
+    let b64 = token.replace(/^token_v2_/, '').replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) {
+      b64 += '=';
+    }
+    const jsonStr = decodeURIComponent(atob(b64));
+    const user = JSON.parse(jsonStr);
+    if (user && user.id && user.email) {
+      return {
+        id: user.id,
+        email: user.email.toLowerCase().trim(),
+        name: user.name,
+        passwordHash: user.passwordHash,
+        createdAt: user.createdAt || new Date().toISOString(),
+      };
+    }
+  } catch {}
+  return null;
+}
+
 async function createTokenWorker(user, env) {
-  const token = 'token_' + user.id + '_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
+  const token = encodeTokenWorker(user);
   workerUserTokens.set(token, user.id);
   const kv = env?.AUTH_KV || env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
@@ -112,15 +153,21 @@ async function getUserByTokenWorker(req, env) {
     }
   }
 
-  if (!userId) {
-    const parts = token.split('_');
-    if (parts.length >= 3 && parts[0] === 'token') {
-      userId = parts[1] + '_' + parts[2];
-    }
+  if (userId) {
+    const userFromStore = await findUserByIdWorker(userId, env);
+    if (userFromStore) return userFromStore;
   }
 
-  if (!userId) return null;
-  return await findUserByIdWorker(userId, env);
+  // Decoupled self-contained token decoding for worker isolate restarts
+  const decodedUser = decodeTokenWorker(token);
+  if (decodedUser) {
+    workerUsersByEmail.set(decodedUser.email, decodedUser);
+    workerUsersById.set(decodedUser.id, decodedUser);
+    workerUserTokens.set(token, decodedUser.id);
+    return decodedUser;
+  }
+
+  return null;
 }
 
 async function getUserHistoryWorker(userId, env) {

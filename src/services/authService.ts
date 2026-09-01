@@ -13,6 +13,8 @@ export interface UserStats {
 }
 
 const AUTH_TOKEN_KEY = 'aramshkon_auth_token_v1';
+const USER_PROFILE_KEY = 'aramshkon_user_profile_v1';
+const LOCAL_ACCOUNTS_KEY = 'aramshkon_local_accounts_v2';
 const MIGRATED_FLAG_KEY = 'aramshkon_history_migrated_v1';
 
 export function getStoredToken(): string | null {
@@ -27,6 +29,72 @@ export function setStoredToken(token: string | null) {
   } else {
     localStorage.removeItem(AUTH_TOKEN_KEY);
   }
+}
+
+function saveUserProfileToLocal(user: User | null) {
+  if (typeof window === 'undefined') return;
+  if (user) {
+    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(USER_PROFILE_KEY);
+  }
+}
+
+function getLocalUserProfile(): User | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(USER_PROFILE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveLocalAccountCredential(email: string, pass: string, user: User, token: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    const accounts = raw ? JSON.parse(raw) : {};
+    accounts[cleanEmail] = { email: cleanEmail, pass, user, token, updatedAt: Date.now() };
+    localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
+  } catch {}
+}
+
+function getLocalAccountCredential(email: string, pass: string): { user: User; token: string } | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
+    if (!raw) return null;
+    const accounts = JSON.parse(raw);
+    const found = accounts[cleanEmail];
+    if (found && found.pass === pass && found.user && found.token) {
+      return { user: found.user, token: found.token };
+    }
+  } catch {}
+  return null;
+}
+
+function decodeTokenClient(token: string): User | null {
+  if (!token || typeof token !== 'string' || !token.startsWith('token_v2_')) return null;
+  try {
+    let b64 = token.replace(/^token_v2_/, '').replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4 !== 0) {
+      b64 += '=';
+    }
+    const jsonStr = decodeURIComponent(atob(b64));
+    const u = JSON.parse(jsonStr);
+    if (u && u.id && u.email) {
+      return {
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        createdAt: u.createdAt || Date.now(),
+      };
+    }
+  } catch {}
+  return null;
 }
 
 function getAuthApiEndpoints(route: string): { primary: string; fallback: string | null } {
@@ -118,45 +186,108 @@ export async function registerUser(name: string, email: string, password: string
   if (data.token) {
     setStoredToken(data.token);
   }
+  if (data.user) {
+    saveUserProfileToLocal(data.user);
+    if (data.token) {
+      saveLocalAccountCredential(email, password, data.user, data.token);
+    }
+  }
   return data;
 }
 
 export async function loginUser(email: string, password: string) {
-  const data = await authFetch('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password }),
-  });
-  if (data.token) {
-    setStoredToken(data.token);
+  try {
+    const data = await authFetch('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    if (data.token) {
+      setStoredToken(data.token);
+    }
+    if (data.user) {
+      saveUserProfileToLocal(data.user);
+      if (data.token) {
+        saveLocalAccountCredential(email, password, data.user, data.token);
+      }
+    }
+    return data;
+  } catch (remoteError: any) {
+    // If worker isolate lost in-memory state, fallback to local registered credentials
+    const localCredential = getLocalAccountCredential(email, password);
+    if (localCredential) {
+      setStoredToken(localCredential.token);
+      saveUserProfileToLocal(localCredential.user);
+      return {
+        success: true,
+        user: localCredential.user,
+        token: localCredential.token,
+        stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
+      };
+    }
+    throw remoteError;
   }
-  return data;
 }
 
 export async function fetchCurrentUserProfile() {
   const token = getStoredToken();
   if (!token) return null;
+
+  const localProfile = getLocalUserProfile();
+
   try {
     const data = await authFetch('/api/auth/me', { method: 'GET' });
-    return data;
-  } catch {
-    setStoredToken(null);
-    return null;
+    if (data && data.user) {
+      saveUserProfileToLocal(data.user);
+      return data;
+    }
+  } catch (err) {
+    console.warn('Network error fetching current user profile, using local fallback:', err);
   }
+
+  if (localProfile) {
+    return {
+      success: true,
+      user: localProfile,
+      stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
+    };
+  }
+
+  const decoded = decodeTokenClient(token);
+  if (decoded) {
+    saveUserProfileToLocal(decoded);
+    return {
+      success: true,
+      user: decoded,
+      stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
+    };
+  }
+
+  return null;
 }
 
 export async function updateUserProfile(name: string) {
-  return await authFetch('/api/auth/profile', {
+  const res = await authFetch('/api/auth/profile', {
     method: 'POST',
     body: JSON.stringify({ name }),
   });
+  if (res?.user) {
+    saveUserProfileToLocal(res.user);
+  }
+  return res;
 }
 
 export async function deleteUserAccount() {
-  const data = await authFetch('/api/auth/account', {
-    method: 'DELETE',
-  });
+  try {
+    await authFetch('/api/auth/account', {
+      method: 'DELETE',
+    });
+  } catch {}
   setStoredToken(null);
-  return data;
+  saveUserProfileToLocal(null);
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(LOCAL_ACCOUNTS_KEY);
+  }
+  return { success: true };
 }
 
 export async function logoutUser() {
@@ -166,6 +297,7 @@ export async function logoutUser() {
     // ignore
   }
   setStoredToken(null);
+  saveUserProfileToLocal(null);
 }
 
 export async function fetchUserHistory(): Promise<SavedConflictRecord[]> {
