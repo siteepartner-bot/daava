@@ -1,13 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
-import { Check, Loader2, Sparkles, Heart } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { motion } from 'motion/react';
+import { Check, Loader2, Sparkles } from 'lucide-react';
 
 interface LoadingAIViewProps {
+  isDone?: boolean;
   onComplete: () => void;
 }
 
-export const LoadingAIView: React.FC<LoadingAIViewProps> = ({ onComplete }) => {
+export const LoadingAIView: React.FC<LoadingAIViewProps> = ({ isDone = false, onComplete }) => {
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
 
   const steps = [
     { title: 'حرف‌هات رو می‌خونم', detail: 'درک بافتار و جزئیات مکالمه شما' },
@@ -16,21 +19,34 @@ export const LoadingAIView: React.FC<LoadingAIViewProps> = ({ onComplete }) => {
     { title: 'پیشنهاد راه‌حل', detail: 'آماده‌سازی جملات آرامش‌بخش برای گفت‌وگو' },
   ];
 
+  // Visual progression timer
   useEffect(() => {
-    const timer1 = setTimeout(() => setCurrentStepIndex(1), 1000);
-    const timer2 = setTimeout(() => setCurrentStepIndex(2), 2200);
-    const timer3 = setTimeout(() => setCurrentStepIndex(3), 3400);
-    const timer4 = setTimeout(() => {
-      onComplete();
-    }, 4600);
+    const t1 = setTimeout(() => setCurrentStepIndex((prev) => Math.max(prev, 1)), 800);
+    const t2 = setTimeout(() => setCurrentStepIndex((prev) => Math.max(prev, 2)), 1600);
+    const t3 = setTimeout(() => setCurrentStepIndex((prev) => Math.max(prev, 3)), 2400);
 
     return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
-      clearTimeout(timer3);
-      clearTimeout(timer4);
+      clearTimeout(t1);
+      clearTimeout(t2);
+      clearTimeout(t3);
     };
-  }, [onComplete]);
+  }, []);
+
+  // When backend analysis finishes (isDone is true), gracefully complete and transition
+  useEffect(() => {
+    if (!isDone) return;
+
+    // Give a short smooth delay so the user sees the solution step checkmark
+    const finishTimeout = setTimeout(() => {
+      setCurrentStepIndex(4); // All 4 steps checked
+      const navTimeout = setTimeout(() => {
+        onCompleteRef.current();
+      }, 500);
+      return () => clearTimeout(navTimeout);
+    }, currentStepIndex < 3 ? 1200 : 400);
+
+    return () => clearTimeout(finishTimeout);
+  }, [isDone, currentStepIndex]);
 
   return (
     <div className="max-w-md mx-auto px-4 py-16 text-center">
@@ -86,34 +102,33 @@ export const LoadingAIView: React.FC<LoadingAIViewProps> = ({ onComplete }) => {
       {/* Animated Steps Container */}
       <div className="bg-white rounded-3xl p-5 md:p-6 border border-purple-100 soft-shadow text-right space-y-4">
         {steps.map((step, idx) => {
-          const isDone = currentStepIndex > idx;
+          const isDoneStep = currentStepIndex > idx;
           const isCurrent = currentStepIndex === idx;
-          const isPending = currentStepIndex < idx;
 
           return (
             <motion.div
               key={idx}
               initial={{ opacity: 0, x: 10 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: idx * 0.15 }}
+              transition={{ delay: idx * 0.1 }}
               className={`flex items-start gap-3 p-3 rounded-2xl transition-all duration-300 ${
                 isCurrent
                   ? 'bg-purple-50/90 border border-purple-200 shadow-xs'
-                  : isDone
+                  : isDoneStep
                   ? 'bg-emerald-50/40 border border-emerald-100/60'
                   : 'opacity-40'
               }`}
             >
               <div
                 className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 text-xs font-bold transition-all ${
-                  isDone
+                  isDoneStep
                     ? 'bg-emerald-600 text-white'
                     : isCurrent
                     ? 'bg-[#7E57C2] text-white animate-spin'
                     : 'bg-slate-200 text-slate-500'
                 }`}
               >
-                {isDone ? (
+                {isDoneStep ? (
                   <Check className="w-3.5 h-3.5" />
                 ) : isCurrent ? (
                   <Loader2 className="w-3.5 h-3.5" />
@@ -128,7 +143,7 @@ export const LoadingAIView: React.FC<LoadingAIViewProps> = ({ onComplete }) => {
                     className={`text-xs md:text-sm font-bold ${
                       isCurrent
                         ? 'text-purple-950'
-                        : isDone
+                        : isDoneStep
                         ? 'text-emerald-950'
                         : 'text-slate-500'
                     }`}

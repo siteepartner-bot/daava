@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Sparkles, ArrowRight, ArrowLeft, Wand2, MessageSquare, AlertCircle } from 'lucide-react';
 import { Card } from '../components/Card';
@@ -29,6 +29,11 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
     initialState?.emotion !== undefined ? initialState.emotion : null
   );
   const [errorMessage, setErrorMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setIsSubmitting(false);
+  }, [mode]);
 
   const handleApplySample = (sample: (typeof SAMPLE_STORIES)[0]) => {
     setStoryText(sample.text);
@@ -47,12 +52,21 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     const cleanText = storyText.trim();
     if (!cleanText || cleanText.length < 20) {
       setErrorMessage('یکم بیشتر برام تعریف کن تا بهتر بتونم کمکت کنم 🤍');
       return;
     }
+
+    if (cleanText.length > 2500) {
+      setErrorMessage('متنت خیلی طولانیه. لطفاً کمی خلاصه‌ترش کن تا بهتر بررسیش کنیم 🤍');
+      return;
+    }
+
     setErrorMessage('');
+    setIsSubmitting(true);
     onSubmit({
       mode,
       storyText: cleanText,
@@ -200,10 +214,11 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
               type="submit"
               size="lg"
               variant="primary"
+              disabled={isSubmitting}
               className="w-full sm:w-auto min-w-[200px]"
               icon={<Sparkles className="w-4 h-4 text-amber-300" />}
             >
-              تحلیل کن ✨
+              {isSubmitting ? 'در حال ارسال...' : 'تحلیل کن ✨'}
             </Button>
           </div>
         </form>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
 import { BottomNavigation } from './components/BottomNavigation';
@@ -49,6 +49,7 @@ export default function App() {
   );
   const [historyItems, setHistoryItems] = useState<SavedConflictRecord[]>([]);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isAILoadingDone, setIsAILoadingDone] = useState(false);
 
   // Modals & Toasts
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
@@ -83,6 +84,7 @@ export default function App() {
     setMode(selectedMode);
     setStoryState((prev) => ({ ...prev, mode: selectedMode }));
     setAnalysisError(null);
+    setIsAILoadingDone(false);
     setCurrentView('input-story');
   };
 
@@ -90,12 +92,14 @@ export default function App() {
     setMode(selectedMode);
     setStoryState((prev) => ({ ...prev, mode: selectedMode }));
     setAnalysisError(null);
+    setIsAILoadingDone(false);
     setCurrentView('input-story');
   };
 
   const handleStorySubmit = async (state: StoryInputState) => {
     setStoryState(state);
     setAnalysisError(null);
+    setIsAILoadingDone(false);
     setCurrentView('loading-ai');
 
     try {
@@ -109,7 +113,7 @@ export default function App() {
 
       setAnalysisResult(result);
 
-      // Save to localStorage history
+      // Save to localStorage history only upon successful analysis
       const updatedHistory = saveConflictToHistory(
         state.mode,
         state.storyText,
@@ -118,15 +122,16 @@ export default function App() {
         result
       );
       setHistoryItems(updatedHistory);
-    } catch (err) {
+      setIsAILoadingDone(true);
+    } catch (err: any) {
       console.error('Error during conflict analysis:', err);
-      setAnalysisError('در پردازش تحلیل اختلالی پیش آمد. لطفاً دوباره امتحان کن.');
+      setIsAILoadingDone(false);
+      setAnalysisError(err?.message || 'یه مشکل موقت پیش اومده. دوباره امتحان کن.');
     }
   };
 
-  const handleAILoadingComplete = () => {
+  const handleAILoadingComplete = useCallback(() => {
     if (analysisError) {
-      // Stay on error state
       return;
     }
     if (mode === 'couple') {
@@ -134,7 +139,7 @@ export default function App() {
     } else {
       setCurrentView('analysis-result');
     }
-  };
+  }, [analysisError, mode]);
 
   const handleSelectHistoryItem = (item: SavedConflictRecord) => {
     setMode(item.mode);
@@ -184,8 +189,8 @@ export default function App() {
             {/* Error State if Analysis Fails */}
             {analysisError ? (
               <ErrorState
-                title="یه مشکلی پیش اومد 🤍"
-                message={analysisError}
+                title="نتونستم این بار تحلیلش کنم 🤍"
+                message="یه مشکل موقت پیش اومده. دوباره امتحان کن."
                 onRetry={() => {
                   setAnalysisError(null);
                   handleStorySubmit(storyState);
@@ -226,7 +231,10 @@ export default function App() {
 
                 {/* Page 4: Loading AI */}
                 {currentView === 'loading-ai' && (
-                  <LoadingAIView onComplete={handleAILoadingComplete} />
+                  <LoadingAIView
+                    isDone={isAILoadingDone}
+                    onComplete={handleAILoadingComplete}
+                  />
                 )}
 
                 {/* Page 5: Analysis Result */}
