@@ -43,8 +43,8 @@ export const CoupleStoryView: React.FC<CoupleStoryViewProps> = ({
     if (isSubmitting) return;
 
     const cleanText = storyText.trim();
-    if (!cleanText || cleanText.length < 20) {
-      setErrorMessage('یکم بیشتر برامون تعریف کن تا بهتر بفهمیم 🤍 (حداقل ۲۰ کاراکتر)');
+    if (!cleanText || cleanText.length < 10) {
+      setErrorMessage('برای اینکه هوش مصنوعی بتونه دقیق تحلیلش کنه، لطفاً کمی بیشتر توضیح بده (حداقل ۱۰ کاراکتر) 🤍');
       return;
     }
 

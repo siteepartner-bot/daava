@@ -29,35 +29,6 @@ export function setStoredToken(token: string | null) {
   }
 }
 
-function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
-  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
-  let savedWorkerUrl = '';
-  if (typeof window !== 'undefined') {
-    savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
-  }
-
-  const metaEnv = (import.meta as any)?.env;
-  const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
-
-  let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
-
-  if (configuredWorker) {
-    const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
-    primaryEndpoint = `${cleanUrl}${route}`;
-    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-  } else if (
-    typeof window !== 'undefined' &&
-    (window.location.hostname.includes('workers.dev') ||
-      window.location.hostname.includes('pages.dev'))
-  ) {
-    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-    fallbackEndpoint = route;
-  }
-
-  return { primary: primaryEndpoint, fallback: fallbackEndpoint };
-}
-
 async function authFetch(route: string, options: RequestInit = {}): Promise<any> {
   const token = getStoredToken();
   const headers: Record<string, string> = {
@@ -68,32 +39,17 @@ async function authFetch(route: string, options: RequestInit = {}): Promise<any>
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const { primary, fallback } = getApiEndpoints(route);
-
-  let response: Response | null = null;
-
+  let response: Response;
   try {
-    response = await fetch(primary, { ...options, headers });
+    response = await fetch(route, { ...options, headers });
   } catch (err) {
-    // try fallback
-  }
-
-  if ((!response || !response.ok) && fallback && fallback !== primary) {
-    try {
-      response = await fetch(fallback, { ...options, headers });
-    } catch (err) {
-      // ignore
-    }
-  }
-
-  if (!response) {
     throw new Error('خطا در برقراری ارتباط با سرور. لطفاً اینترنت خود را بررسی کنید.');
   }
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(data.message || 'یه مشکلی پیش آمد 🤍');
+    throw new Error(data.message || 'خطایی در پردازش درخواست پیش آمد 🤍');
   }
 
   return data;
