@@ -130,7 +130,7 @@ export interface SavedConflictRecord {
 export type AnalysisResultData = ConflictAnalysisResult;
 export type HistoryItem = SavedConflictRecord;
 
-// Couple Session Management Types (Step 5)
+// Couple Session Management Types (Step 5 & Step 6)
 export type CoupleSessionStatus =
   | 'waiting'
   | 'participant_a_completed'
@@ -142,6 +142,32 @@ export interface CoupleParticipantSummary {
   name: string;
   completed: boolean;
   completedAt?: number;
+}
+
+export interface MainDifferenceItem {
+  topic: string;
+  participantA: string;
+  participantB: string;
+}
+
+export interface ParticipantAnalysis {
+  emotion: string;
+  possibleNeed: string;
+  behaviorToImprove: string;
+}
+
+export interface CoupleSharedAnalysis {
+  overallSummary: string; // خلاصه اصل ماجرا
+  commonGround: string[]; // نقاط مشترک
+  mainDifferences: (MainDifferenceItem | string)[]; // تفاوت دیدگاه‌ها
+  possibleMisunderstandings: string[]; // سوءتفاهم‌های احتمالی
+  participantA: ParticipantAnalysis; // تحلیل اختصاصی نفر اول
+  participantB: ParticipantAnalysis; // تحلیل اختصاصی نفر دوم
+  escalationPattern: string[]; // زنجیره تشدید اختلاف
+  sharedNeed: string; // نیاز مشترک و بنیادین
+  fairAssessment: string; // ارزیابی منصفانه و بی‌طرفانه
+  nextStep: string; // قدم عملی بعدی
+  conversationStarter: string; // جمله پیشنهاد برای شروع گفتگو
 }
 
 export interface CoupleSessionPublicState {
@@ -157,6 +183,8 @@ export interface CoupleSessionPublicState {
   isReadyForAnalysis: boolean;
   yourRole?: 'participantA' | 'participantB';
   yourCompleted?: boolean;
+  sharedAnalysis?: CoupleSharedAnalysis | null;
+  analyzedAt?: number | null;
 }
 
 export interface LocalCoupleSessionAuth {

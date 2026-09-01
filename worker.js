@@ -137,6 +137,8 @@ function sanitizeSessionForPublic(session, requesterRole) {
         : requesterRole === 'participantB'
         ? isBCompleted
         : false,
+    sharedAnalysis: isReady ? session.sharedAnalysis || null : null,
+    analyzedAt: session.analyzedAt || null,
   };
 }
 
@@ -416,6 +418,158 @@ export default {
 
           return new Response(
             JSON.stringify({ success: true, message: 'از جلسه خارج شدید.' }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+
+        // Couple Session: POST /api/couple/analyze or /couple/analyze
+        if (normalizedPath === '/api/couple/analyze' || normalizedPath === '/couple/analyze') {
+          const { sessionIdOrCode, token, forceReanalyze } = body;
+          const authHeader = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim();
+          const authToken = authHeader || token || '';
+
+          if (!sessionIdOrCode) {
+            return new Response(
+              JSON.stringify({ error: 'INVALID_SESSION', message: 'شناسه یا کد جلسه معتبر نیست.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const session = await getSessionFromStore(sessionIdOrCode, env);
+          if (!session) {
+            return new Response(
+              JSON.stringify({ error: 'SESSION_NOT_FOUND', message: 'جلسه مورد نظر پیدا نشد.' }),
+              { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          let requesterRole;
+          if (authToken) {
+            if (session.participantA?.token === authToken) requesterRole = 'participantA';
+            else if (session.participantB?.token === authToken) requesterRole = 'participantB';
+          }
+
+          const isACompleted = Boolean(session.participantA?.completed && session.participantA?.story);
+          const isBCompleted = Boolean(session.participantB?.completed && session.participantB?.story);
+
+          if (!isACompleted || !isBCompleted) {
+            return new Response(
+              JSON.stringify({ error: 'NOT_READY', message: 'هنوز هر دو نفر دیدگاه خود را ثبت نکرده‌اند.' }),
+              { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          if (session.sharedAnalysis && forceReanalyze !== true) {
+            return new Response(
+              JSON.stringify({
+                success: true,
+                sharedAnalysis: session.sharedAnalysis,
+                session: sanitizeSessionForPublic(session, requesterRole),
+              }),
+              { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const apiKey = env?.GEMINI_API_KEY;
+          if (!apiKey) {
+            return new Response(
+              JSON.stringify({
+                error: 'GEMINI_API_KEY_MISSING',
+                message: 'متغیر GEMINI_API_KEY در تنظیمات Worker کلودفلر تعریف نشده است.',
+              }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          const pA = session.participantA;
+          const pB = session.participantB;
+          const category = pA.category || pB.category || 'ارتباط و رابطه';
+
+          const systemInstruction = `تو یک میانجی تحلیلی و روان‌شناس روابط کاملاً بی‌طرف، آرامش‌بخش، منصف و همدل هستی.
+دو نفر که درگیر یک اختلاف عاطفی یا گفتگویی شده‌اند، روایت خود از ماجرا را به صورت جداگانه ثبت کرده‌اند.
+
+روایت نفر اول (شرکت‌کننده A):
+نام/لقب: ${pA.name || 'نفر اول'}
+جنسیت: ${pA.gender === 'female' ? 'خانم' : pA.gender === 'male' ? 'آقا' : 'مشخص‌نشده'}
+احساس انتخاب‌شده: ${pA.emotion || 'نامشخص'}
+شرح روایت: ${pA.story}
+
+روایت نفر دوم (شرکت‌کننده B):
+نام/لقب: ${pB.name || 'نفر دوم'}
+جنسیت: ${pB.gender === 'female' ? 'خانم' : pB.gender === 'male' ? 'آقا' : 'مشخص‌نشده'}
+احساس انتخاب‌شده: ${pB.emotion || 'نامشخص'}
+شرح روایت: ${pB.story}
+
+موضوع کلان رابطه: ${category}
+
+قوانین حیاتی تحلیل بی‌طرفانه (Strict Privacy & Neutrality):
+۱. طرف هیچ‌کدام از طرفین را نگیر و به هیچ وجه دنبال مقصر یا «حق با کیست» نگرد.
+۲. دو روایت را به عنوان دو «برداشت و دیدگاه شخصی» در نظر بگیر، نه حقیقت مطلق یا ادعای ثابتی.
+۳. اگر دو نفر یک اتفاق را متفاوت تعریف کرده‌اند، اختلاف روایت و برداشت متفاوتشان را با احترام مشخص کن.
+۴. چیزی که در داده‌ها وجود ندارد را به عنوان واقعیت قطعی بیان نکن.
+۵. درباره نیت داخلی افراد حدس قطعی نزن و حتماً از عبارت‌های «ممکن است»، «به نظر می‌رسد»، «احتمالاً» استفاده کن.
+۶. رفتار آسیب‌زا یا توهین‌آمیز را توجیه نکن اما قضاوت شخصیتی هم نکن.
+۷. در صورت وجود نشانه‌های تهدید یا خشونت، امنیت افراد را اولویت قرار بده.
+۸. هدف تحلیل برنده کردن هیچ‌کس نیست، بلکه هموار کردن مسیر گفتگو و درک متقابل است.
+۹. خروجی باید دقیقاً و فقط طبق JSON Schema تعریف‌شده باشد.`;
+
+          const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
+
+          const candidateModels = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+          let parsedAnalysis = null;
+
+          for (const model of candidateModels) {
+            try {
+              const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: promptText }] }],
+                  systemInstruction: { parts: [{ text: systemInstruction }] },
+                  generationConfig: {
+                    temperature: 0.3,
+                    responseMimeType: 'application/json',
+                  },
+                }),
+              });
+
+              if (!res.ok) continue;
+
+              const data = await res.json();
+              const textOut = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+              if (textOut) {
+                try {
+                  parsedAnalysis = JSON.parse(textOut);
+                } catch {
+                  const match = textOut.match(/\{[\s\S]*\}/);
+                  if (match) parsedAnalysis = JSON.parse(match[0]);
+                }
+              }
+
+              if (parsedAnalysis) break;
+            } catch (err) {
+              console.warn(`Worker gemini call error with model ${model}:`, err);
+            }
+          }
+
+          if (!parsedAnalysis) {
+            return new Response(
+              JSON.stringify({ error: 'ANALYSIS_FAILED', message: 'نتونستیم تحلیل مشترک رو انجام بدیم 🤍' }),
+              { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+            );
+          }
+
+          session.sharedAnalysis = parsedAnalysis;
+          session.analyzedAt = Date.now();
+          session.updatedAt = Date.now();
+          await saveSessionToStore(session, env);
+
+          return new Response(
+            JSON.stringify({
+              success: true,
+              sharedAnalysis: session.sharedAnalysis,
+              session: sanitizeSessionForPublic(session, requesterRole),
+            }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
           );
         }

@@ -27,6 +27,7 @@ interface CoupleInviteViewProps {
   auth: LocalCoupleSessionAuth;
   onSessionUpdated: (session: CoupleSessionPublicState) => void;
   onOpenStoryEditor?: () => void;
+  onProceedToComparison?: () => void;
   onBack: () => void;
   onLeaveSession: () => void;
   onNotify: (msg: string, type?: 'success' | 'error' | 'info') => void;
@@ -37,6 +38,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
   auth,
   onSessionUpdated,
   onOpenStoryEditor,
+  onProceedToComparison,
   onBack,
   onLeaveSession,
   onNotify,
@@ -372,14 +374,15 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
                 fullWidth
                 className="bg-white text-purple-900 hover:bg-purple-50 font-extrabold shadow-md cursor-pointer"
                 onClick={() => {
-                  onNotify('تحلیل مشترک در مرحله بعد فعال می‌شود 🤍', 'info');
+                  if (onProceedToComparison) {
+                    onProceedToComparison();
+                  } else {
+                    onNotify('مشاهده تحلیل مشترک 🤍', 'info');
+                  }
                 }}
               >
-                تحلیل مشترک ✨
+                مشاهده تحلیل مشترک ✨
               </Button>
-              <span className="text-[11px] text-purple-200 block mt-2">
-                (تحلیل مشترک در مرحله بعد فعال می‌شود.)
-              </span>
             </div>
           </motion.div>
         )}

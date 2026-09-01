@@ -275,3 +275,50 @@ export async function leaveCoupleSession(sessionIdOrCode: string): Promise<void>
     clearActiveSessionAuth();
   }
 }
+
+/**
+ * 6. Analyze couple session (Step 6)
+ */
+export async function analyzeCoupleSession(params: {
+  sessionIdOrCode: string;
+  token?: string;
+  forceReanalyze?: boolean;
+}): Promise<{
+  sharedAnalysis: any;
+  session: CoupleSessionPublicState;
+}> {
+  const auth = getActiveSessionAuth();
+  const token =
+    params.token ||
+    (auth?.sessionId === params.sessionIdOrCode || auth?.joinCode === params.sessionIdOrCode
+      ? auth.token
+      : undefined);
+
+  const response = await fetchWithFallback('/api/couple/analyze', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      sessionIdOrCode: params.sessionIdOrCode,
+      token,
+      forceReanalyze: params.forceReanalyze || false,
+    }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'نتونستیم تحلیل مشترک رو انجام بدیم 🤍');
+  }
+
+  const data = await response.json();
+  if (!data.success || !data.sharedAnalysis) {
+    throw new Error(data.message || 'پاسخ معتبری از تحلیل دریافت نشد.');
+  }
+
+  return {
+    sharedAnalysis: data.sharedAnalysis,
+    session: data.session,
+  };
+}

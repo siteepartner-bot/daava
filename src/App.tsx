@@ -400,6 +400,7 @@ export default function App() {
                     auth={coupleAuth}
                     onSessionUpdated={setCoupleSession}
                     onOpenStoryEditor={() => setCurrentView('couple-story')}
+                    onProceedToComparison={() => setCurrentView('couple-comparison')}
                     onBack={() => setCurrentView('landing')}
                     onLeaveSession={handleLeaveCoupleSession}
                     onNotify={addToast}
@@ -439,17 +440,27 @@ export default function App() {
                     session={coupleSession}
                     auth={coupleAuth}
                     onSessionUpdated={setCoupleSession}
+                    onProceedToComparison={() => setCurrentView('couple-comparison')}
                     onLeaveSession={handleLeaveCoupleSession}
                     onNotify={addToast}
                   />
                 )}
 
-                {/* Couple Comparison (Reserved for Step 6) */}
+                {/* Couple Comparison View (Step 6) */}
                 {currentView === 'couple-comparison' && (
                   <CoupleComparisonView
-                    data={analysisResult}
+                    session={coupleSession}
+                    auth={coupleAuth}
+                    onSessionUpdated={setCoupleSession}
                     onProceedToEnding={() => setCurrentView('ending')}
-                    onBack={() => setCurrentView('couple-invite')}
+                    onBack={() => {
+                      if (coupleAuth?.role === 'participantA') {
+                        setCurrentView('couple-invite');
+                      } else {
+                        setCurrentView('couple-waiting');
+                      }
+                    }}
+                    onNotify={addToast}
                   />
                 )}
 

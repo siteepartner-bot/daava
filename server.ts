@@ -1,16 +1,11 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
 function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -164,6 +159,91 @@ const REWRITE_REPLY_SCHEMA = {
     },
   },
   required: ['message'],
+};
+
+const SHARED_ANALYSIS_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    overallSummary: {
+      type: Type.STRING,
+      description: 'خلاصه اصل ماجرا و اتفاقی که رخ داده به صورت کاملاً بی‌طرفانه',
+    },
+    commonGround: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'لیست ۳ تا ۴ مورد از نقاط مشترک و خواسته یا دغدغه مشترک هر دو طرف',
+    },
+    mainDifferences: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          topic: { type: Type.STRING, description: 'موضوع یا محور اختلاف' },
+          participantA: { type: Type.STRING, description: 'دیدگاه و برداشت نفر اول' },
+          participantB: { type: Type.STRING, description: 'دیدگاه و برداشت نفر دوم' },
+        },
+        required: ['topic', 'participantA', 'participantB'],
+      },
+      description: 'اختلاف دیدگاه‌ها به تفکیک برداشت نفر اول و نفر دوم',
+    },
+    possibleMisunderstandings: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'لیست سوءتفاهم‌های احتمالی که بین دو نفر شکل گرفته است',
+    },
+    participantA: {
+      type: Type.OBJECT,
+      properties: {
+        emotion: { type: Type.STRING, description: 'احساس شناسایی‌شده نفر اول' },
+        possibleNeed: { type: Type.STRING, description: 'نیاز عاطفی یا روانی احتمالی نفر اول' },
+        behaviorToImprove: { type: Type.STRING, description: 'رفتار یا واکنشی که برای نفر اول قابلیت بهبود دارد' },
+      },
+      required: ['emotion', 'possibleNeed', 'behaviorToImprove'],
+    },
+    participantB: {
+      type: Type.OBJECT,
+      properties: {
+        emotion: { type: Type.STRING, description: 'احساس شناسایی‌شده نفر دوم' },
+        possibleNeed: { type: Type.STRING, description: 'نیاز عاطفی یا روانی احتمالی نفر دوم' },
+        behaviorToImprove: { type: Type.STRING, description: 'رفتار یا واکنشی که برای نفر دوم قابلیت بهبود دارد' },
+      },
+      required: ['emotion', 'possibleNeed', 'behaviorToImprove'],
+    },
+    escalationPattern: {
+      type: Type.ARRAY,
+      items: { type: Type.STRING },
+      description: 'زنجیره ۴ تا ۶ مرحله‌ای تشدید دعوا (از اتفاق اولیه تا برداشت‌ها، واکنش‌ها و تشدید)',
+    },
+    sharedNeed: {
+      type: Type.STRING,
+      description: 'نیاز مشترک و بنیادین هر دو نفر در این رابطه',
+    },
+    fairAssessment: {
+      type: Type.STRING,
+      description: 'بررسی منصفانه و کاملاً بی‌طرفانه ماجرا بدون مقصر جلوه دادن هیچ‌کدام',
+    },
+    nextStep: {
+      type: Type.STRING,
+      description: 'پیشنهاد و اقدام عملی بعدی برای شروع گفتگو و حل مسئله',
+    },
+    conversationStarter: {
+      type: Type.STRING,
+      description: 'یک جمله بسیار طبیعی، ملموس و صمیمی برای شروع دوباره گفتگو توسط هر یک از دو طرف',
+    },
+  },
+  required: [
+    'overallSummary',
+    'commonGround',
+    'mainDifferences',
+    'possibleMisunderstandings',
+    'participantA',
+    'participantB',
+    'escalationPattern',
+    'sharedNeed',
+    'fairAssessment',
+    'nextStep',
+    'conversationStarter',
+  ],
 };
 
 async function startServer() {
@@ -548,6 +628,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     status: 'waiting' | 'participant_a_completed' | 'participant_b_completed' | 'ready_for_analysis' | 'expired';
     participantA: ParticipantRecord;
     participantB?: ParticipantRecord | null;
+    sharedAnalysis?: any;
+    analyzedAt?: number;
   }
 
   // In-memory sessions map
@@ -612,6 +694,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           : requesterRole === 'participantB'
           ? isBCompleted
           : false,
+      sharedAnalysis: isReady ? session.sharedAnalysis || null : null,
+      analyzedAt: session.analyzedAt || null,
     };
   }
 
@@ -991,8 +1075,166 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     }
   });
 
+  // 6. Analyze Couple Session (Shared Gemini Analysis)
+  app.post('/api/couple/analyze', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { sessionIdOrCode, token, forceReanalyze } = req.body || {};
+      const authToken = (
+        req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+        token ||
+        ''
+      ).trim();
+
+      if (!sessionIdOrCode || typeof sessionIdOrCode !== 'string') {
+        res.status(400).json({
+          error: 'INVALID_SESSION',
+          message: 'شناسه یا کد جلسه معتبر نیست.',
+        });
+        return;
+      }
+
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
+
+      if (!session) {
+        res.status(404).json({
+          error: 'SESSION_NOT_FOUND',
+          message: 'جلسه مورد نظر پیدا نشد.',
+        });
+        return;
+      }
+
+      if (session.expiresAt < Date.now()) {
+        res.status(410).json({
+          error: 'SESSION_EXPIRED',
+          message: 'این جلسه دیگه فعال نیست 🤍',
+        });
+        return;
+      }
+
+      // Check authorization role
+      let requesterRole: 'participantA' | 'participantB' | undefined;
+      if (authToken) {
+        if (session.participantA.token === authToken) {
+          requesterRole = 'participantA';
+        } else if (session.participantB && session.participantB.token === authToken) {
+          requesterRole = 'participantB';
+        }
+      }
+
+      const isACompleted = Boolean(session.participantA?.completed && session.participantA?.story);
+      const isBCompleted = Boolean(session.participantB?.completed && session.participantB?.story);
+
+      if (!isACompleted || !isBCompleted) {
+        res.status(400).json({
+          error: 'NOT_READY',
+          message: 'هنوز هر دو نفر دیدگاه خود را ثبت نکرده‌اند.',
+        });
+        return;
+      }
+
+      // Return existing sharedAnalysis if available and forceReanalyze is false
+      if (session.sharedAnalysis && forceReanalyze !== true) {
+        res.json({
+          success: true,
+          sharedAnalysis: session.sharedAnalysis,
+          session: sanitizeSessionForPublic(session, requesterRole),
+        });
+        return;
+      }
+
+      if (!process.env.GEMINI_API_KEY) {
+        console.error('GEMINI_API_KEY is missing in server environment.');
+        res.status(500).json({
+          error: 'API_KEY_MISSING',
+          message: 'کلید ارتباط با هوش مصنوعی تنظیم نشده است.',
+        });
+        return;
+      }
+
+      const pA = session.participantA;
+      const pB = session.participantB!;
+      const category = pA.category || pB.category || 'ارتباط و رابطه';
+
+      const systemInstruction = `تو یک میانجی تحلیلی و روان‌شناس روابط کاملاً بی‌طرف، آرامش‌بخش، منصف و همدل هستی.
+دو نفر که درگیر یک اختلاف عاطفی یا گفتگویی شده‌اند، روایت خود از ماجرا را به صورت جداگانه ثبت کرده‌اند.
+
+روایت نفر اول (شرکت‌کننده A):
+نام/لقب: ${pA.name || 'نفر اول'}
+جنسیت: ${pA.gender === 'female' ? 'خانم' : pA.gender === 'male' ? 'آقا' : 'مشخص‌نشده'}
+احساس انتخاب‌شده: ${pA.emotion || 'نامشخص'}
+شرح روایت: ${pA.story}
+
+روایت نفر دوم (شرکت‌کننده B):
+نام/لقب: ${pB.name || 'نفر دوم'}
+جنسیت: ${pB.gender === 'female' ? 'خانم' : pB.gender === 'male' ? 'آقا' : 'مشخص‌نشده'}
+احساس انتخاب‌شده: ${pB.emotion || 'نامشخص'}
+شرح روایت: ${pB.story}
+
+موضوع کلان رابطه: ${category}
+
+قوانین حیاتی تحلیل بی‌طرفانه (Strict Privacy & Neutrality):
+۱. طرف هیچ‌کدام از طرفین را نگیر و به هیچ وجه دنبال مقصر یا «حق با کیست» نگرد.
+۲. دو روایت را به عنوان دو «برداشت و دیدگاه شخصی» در نظر بگیر، نه حقیقت مطلق یا ادعای ثابتی.
+۳. اگر دو نفر یک اتفاق را متفاوت تعریف کرده‌اند، اختلاف روایت و برداشت متفاوتشان را با احترام و دقت در بخش mainDifferences مشخص کن.
+۴. چیزی که در داده‌ها وجود ندارد را به عنوان واقعیت قطعی بیان نکن.
+۵. درباره نیت داخلی افراد حدس قطعی نزن و حتماً از عبارت‌های «ممکن است»، «به نظر می‌رسد»، «احتمالاً» استفاده کن.
+۶. رفتار آسیب‌زا یا توهین‌آمیز را توجیه نکن اما قضاوت شخصیتی هم نکن.
+۷. در صورت وجود نشانه‌های تهدید یا خشونت، امنیت افراد را اولویت قرار بده.
+۸. هدف تحلیل برنده کردن هیچ‌کس نیست، بلکه هموار کردن مسیر گفتگو و درک متقابل است.
+۹. خروجی باید دقیقاً و فقط طبق JSON Schema تعریف‌شده باشد.`;
+
+      const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
+
+      const ai = getGeminiClient();
+      const response = await ai.models.generateContent({
+        model: 'gemini-3.7-flash',
+        contents: promptText,
+        config: {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: SHARED_ANALYSIS_SCHEMA,
+          temperature: 0.3,
+        },
+      });
+
+      const responseText = response.text || '';
+      let parsedAnalysis: any;
+
+      try {
+        parsedAnalysis = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('JSON Parse error from Gemini couple analysis:', parseError, responseText);
+        const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsedAnalysis = JSON.parse(jsonMatch[0]);
+        } else {
+          throw new Error('فرمت پاسخ دریافت شده از هوش مصنوعی معتبر نیست.');
+        }
+      }
+
+      session.sharedAnalysis = parsedAnalysis;
+      session.analyzedAt = Date.now();
+      session.updatedAt = Date.now();
+
+      res.json({
+        success: true,
+        sharedAnalysis: session.sharedAnalysis,
+        session: sanitizeSessionForPublic(session, requesterRole),
+      });
+    } catch (error: any) {
+      console.error('Error analyzing couple session:', error);
+      res.status(500).json({
+        error: 'ANALYSIS_FAILED',
+        message: 'نتونستیم تحلیل مشترک رو انجام بدیم 🤍',
+      });
+    }
+  });
+
   // Vite middleware in dev / Static files in prod
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
