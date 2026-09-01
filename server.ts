@@ -334,7 +334,7 @@ ${emotion || 'مشخص نشده'}
 
 لطفاً این ماجرا را با دقت، همدلی، توجه به پویایی‌های رابطه و بی‌طرفی کامل تحلیل کن و نتیجه را در قالب ساختار JSON مشخص‌شده بازگردان.`;
 
-      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
       let responseText: string | undefined;
       let lastModelError: any = null;
 
@@ -462,7 +462,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
 
 لطفاً برای هر یک از ۵ لحن (calm, intimate, direct, emotional, friendly) یک پیام فارسی روان و کاملاً انسانی تولید کن و در قالب ساختار JSON بازگردان.`;
 
-      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
       let responseText: string | undefined;
       let lastModelError: any = null;
 
@@ -558,7 +558,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
 
 لطفاً پیام را با توجه دقیق به این دستور بازنویسی کن و خروجی را در قالب JSON مشخص‌شده تحویل بده.`;
 
-      const candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.6-flash', 'gemini-3.7-flash'];
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
       let responseText: string | undefined;
       let lastModelError: any = null;
 
@@ -1188,18 +1188,35 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
 
       const ai = getGeminiClient();
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.7-flash',
-        contents: promptText,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: SHARED_ANALYSIS_SCHEMA,
-          temperature: 0.3,
-        },
-      });
+      const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
+      let responseText = '';
+      let lastAnalysisErr: any = null;
 
-      const responseText = response.text || '';
+      for (const modelName of candidateModels) {
+        try {
+          const response = await ai.models.generateContent({
+            model: modelName,
+            contents: promptText,
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              responseSchema: SHARED_ANALYSIS_SCHEMA,
+              temperature: 0.3,
+            },
+          });
+          if (response.text) {
+            responseText = response.text;
+            break;
+          }
+        } catch (err: any) {
+          lastAnalysisErr = err;
+          console.warn(`Couple analysis model ${modelName} failed: ${err?.message}`);
+        }
+      }
+
+      if (!responseText) {
+        throw lastAnalysisErr || new Error('پاسخی از هوش مصنوعی دریافت نشد.');
+      }
       let parsedAnalysis: any;
 
       try {

@@ -515,7 +515,7 @@ export default {
 
           const promptText = `لطفاً روایت هر دو نفر را بررسی کن و تحلیل مشترک دونفره، منصفانه و ساختاریافته را به زبان فارسی و فرمت JSON ارائه بده.`;
 
-          const candidateModels = ['gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-3.6-flash'];
+          const candidateModels = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-2.5-flash'];
           let parsedAnalysis = null;
 
           for (const model of candidateModels) {
@@ -589,7 +589,8 @@ export default {
         const candidateModels = [
           'gemini-3.5-flash',
           'gemini-3.6-flash',
-          'gemini-3.5-flash-lite',
+          'gemini-3.7-flash',
+          'gemini-2.5-flash',
         ];
 
         // ---------------------------------------------------------------------------------
