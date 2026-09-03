@@ -13,8 +13,6 @@ export interface UserStats {
 }
 
 const AUTH_TOKEN_KEY = 'aramshkon_auth_token_v1';
-const USER_PROFILE_KEY = 'aramshkon_user_profile_v1';
-const LOCAL_ACCOUNTS_KEY = 'aramshkon_local_accounts_v2';
 const MIGRATED_FLAG_KEY = 'aramshkon_history_migrated_v1';
 
 export function getStoredToken(): string | null {
@@ -31,73 +29,7 @@ export function setStoredToken(token: string | null) {
   }
 }
 
-function saveUserProfileToLocal(user: User | null) {
-  if (typeof window === 'undefined') return;
-  if (user) {
-    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(user));
-  } else {
-    localStorage.removeItem(USER_PROFILE_KEY);
-  }
-}
-
-function getLocalUserProfile(): User | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const raw = localStorage.getItem(USER_PROFILE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveLocalAccountCredential(email: string, pass: string, user: User, token: string) {
-  if (typeof window === 'undefined') return;
-  try {
-    const cleanEmail = email.trim().toLowerCase();
-    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
-    const accounts = raw ? JSON.parse(raw) : {};
-    accounts[cleanEmail] = { email: cleanEmail, pass, user, token, updatedAt: Date.now() };
-    localStorage.setItem(LOCAL_ACCOUNTS_KEY, JSON.stringify(accounts));
-  } catch {}
-}
-
-function getLocalAccountCredential(email: string, pass: string): { user: User; token: string } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const cleanEmail = email.trim().toLowerCase();
-    const raw = localStorage.getItem(LOCAL_ACCOUNTS_KEY);
-    if (!raw) return null;
-    const accounts = JSON.parse(raw);
-    const found = accounts[cleanEmail];
-    if (found && found.pass === pass && found.user && found.token) {
-      return { user: found.user, token: found.token };
-    }
-  } catch {}
-  return null;
-}
-
-function decodeTokenClient(token: string): User | null {
-  if (!token || typeof token !== 'string' || !token.startsWith('token_v2_')) return null;
-  try {
-    let b64 = token.replace(/^token_v2_/, '').replace(/-/g, '+').replace(/_/g, '/');
-    while (b64.length % 4 !== 0) {
-      b64 += '=';
-    }
-    const jsonStr = decodeURIComponent(atob(b64));
-    const u = JSON.parse(jsonStr);
-    if (u && u.id && u.email) {
-      return {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        createdAt: u.createdAt || Date.now(),
-      };
-    }
-  } catch {}
-  return null;
-}
-
-function getAuthApiEndpoints(route: string): { primary: string; fallback: string | null } {
+function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
   const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
@@ -108,7 +40,7 @@ function getAuthApiEndpoints(route: string): { primary: string; fallback: string
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
   let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = `${CLOUDFLARE_WORKER_URL}${route}`;
+  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
@@ -136,220 +68,84 @@ async function authFetch(route: string, options: RequestInit = {}): Promise<any>
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const { primary, fallback } = getAuthApiEndpoints(route);
+  const { primary, fallback } = getApiEndpoints(route);
 
   let response: Response | null = null;
-  let responseData: any = null;
 
-  // 1. Try primary endpoint
   try {
-    const res = await fetch(primary, { ...options, headers });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok || (res.status !== 404 && res.status < 500 && (data.message || data.error))) {
-      response = res;
-      responseData = data;
-    }
-  } catch {
-    // Primary network error
+    response = await fetch(primary, { ...options, headers });
+  } catch (err) {
+    // try fallback
   }
 
-  // 2. Fallback if primary endpoint failed or gave 404/500
-  if (!response && fallback && fallback !== primary) {
+  if ((!response || !response.ok) && fallback && fallback !== primary) {
     try {
-      const res = await fetch(fallback, { ...options, headers });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok || res.status < 500) {
-        response = res;
-        responseData = data;
-      }
-    } catch {
-      // Fallback network error
+      response = await fetch(fallback, { ...options, headers });
+    } catch (err) {
+      // ignore
     }
   }
 
   if (!response) {
-    throw new Error('خطا در برقراری ارتباط با سرور. لطفاً اتصال اینترنت را بررسی کنید.');
+    throw new Error('خطا در برقراری ارتباط با سرور. لطفاً اینترنت خود را بررسی کنید.');
   }
+
+  const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(responseData?.message || responseData?.error || 'خطایی در پردازش درخواست پیش آمد 🤍');
+    throw new Error(data.message || 'یه مشکلی پیش آمد 🤍');
   }
 
-  return responseData;
-}
-
-export function getInitialCachedUser(): User | null {
-  if (typeof window === 'undefined') return null;
-  const token = getStoredToken();
-  if (!token) return null;
-
-  // 1. Return cached user profile if present
-  const localProfile = getLocalUserProfile();
-  if (localProfile) return localProfile;
-
-  // 2. Decode user from token_v2_ if possible
-  const decoded = decodeTokenClient(token);
-  if (decoded) {
-    saveUserProfileToLocal(decoded);
-    return decoded;
-  }
-
-  return null;
+  return data;
 }
 
 export async function registerUser(name: string, email: string, password: string) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanName = name.trim();
-  const cleanPass = password.trim();
-
-  try {
-    const data = await authFetch('/api/auth/register', {
-      method: 'POST',
-      body: JSON.stringify({ name: cleanName, email: cleanEmail, password: cleanPass }),
-    });
-    if (data.token) {
-      setStoredToken(data.token);
-    }
-    if (data.user) {
-      saveUserProfileToLocal(data.user);
-      if (data.token) {
-        saveLocalAccountCredential(cleanEmail, cleanPass, data.user, data.token);
-      }
-    }
-    return data;
-  } catch (remoteError: any) {
-    // Fallback: If network or worker error occurs, create a seamless local device account
-    const mockUser: User = {
-      id: 'usr_' + Date.now().toString(36) + Math.random().toString(36).substring(2, 6),
-      name: cleanName,
-      email: cleanEmail,
-      createdAt: Date.now(),
-    };
-    const mockToken =
-      'token_v2_' +
-      btoa(
-        encodeURIComponent(
-          JSON.stringify({
-            id: mockUser.id,
-            email: mockUser.email,
-            name: mockUser.name,
-            createdAt: new Date(mockUser.createdAt).toISOString(),
-          })
-        )
-      )
-        .replace(/\+/g, '-')
-        .replace(/\//g, '_')
-        .replace(/=+$/, '');
-
-    setStoredToken(mockToken);
-    saveUserProfileToLocal(mockUser);
-    saveLocalAccountCredential(cleanEmail, cleanPass, mockUser, mockToken);
-
-    return {
-      success: true,
-      user: mockUser,
-      token: mockToken,
-      stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
-    };
+  const data = await authFetch('/api/auth/register', {
+    method: 'POST',
+    body: JSON.stringify({ name, email, password }),
+  });
+  if (data.token) {
+    setStoredToken(data.token);
   }
+  return data;
 }
 
 export async function loginUser(email: string, password: string) {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanPass = password.trim();
-
-  try {
-    const data = await authFetch('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ email: cleanEmail, password: cleanPass }),
-    });
-    if (data.token) {
-      setStoredToken(data.token);
-    }
-    if (data.user) {
-      saveUserProfileToLocal(data.user);
-      if (data.token) {
-        saveLocalAccountCredential(cleanEmail, cleanPass, data.user, data.token);
-      }
-    }
-    return data;
-  } catch (remoteError: any) {
-    // If worker isolate lost in-memory state or network error, fallback to local registered credentials on this device
-    const localCredential = getLocalAccountCredential(cleanEmail, cleanPass);
-    if (localCredential) {
-      setStoredToken(localCredential.token);
-      saveUserProfileToLocal(localCredential.user);
-      return {
-        success: true,
-        user: localCredential.user,
-        token: localCredential.token,
-        stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
-      };
-    }
-    throw remoteError;
+  const data = await authFetch('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password }),
+  });
+  if (data.token) {
+    setStoredToken(data.token);
   }
+  return data;
 }
 
 export async function fetchCurrentUserProfile() {
   const token = getStoredToken();
   if (!token) return null;
-
-  const localProfile = getLocalUserProfile();
-
   try {
     const data = await authFetch('/api/auth/me', { method: 'GET' });
-    if (data && data.user) {
-      saveUserProfileToLocal(data.user);
-      return data;
-    }
-  } catch (err) {
-    console.warn('Network error fetching current user profile, using local fallback:', err);
+    return data;
+  } catch {
+    setStoredToken(null);
+    return null;
   }
-
-  if (localProfile) {
-    return {
-      success: true,
-      user: localProfile,
-      stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
-    };
-  }
-
-  const decoded = decodeTokenClient(token);
-  if (decoded) {
-    saveUserProfileToLocal(decoded);
-    return {
-      success: true,
-      user: decoded,
-      stats: { personalAnalysesCount: 0, coupleSessionsCount: 0 },
-    };
-  }
-
-  return null;
 }
 
 export async function updateUserProfile(name: string) {
-  const res = await authFetch('/api/auth/profile', {
+  return await authFetch('/api/auth/profile', {
     method: 'POST',
     body: JSON.stringify({ name }),
   });
-  if (res?.user) {
-    saveUserProfileToLocal(res.user);
-  }
-  return res;
 }
 
 export async function deleteUserAccount() {
-  try {
-    await authFetch('/api/auth/account', {
-      method: 'DELETE',
-    });
-  } catch {}
+  const data = await authFetch('/api/auth/account', {
+    method: 'DELETE',
+  });
   setStoredToken(null);
-  saveUserProfileToLocal(null);
-  if (typeof window !== 'undefined') {
-    localStorage.removeItem(LOCAL_ACCOUNTS_KEY);
-  }
-  return { success: true };
+  return data;
 }
 
 export async function logoutUser() {
@@ -359,7 +155,6 @@ export async function logoutUser() {
     // ignore
   }
   setStoredToken(null);
-  saveUserProfileToLocal(null);
 }
 
 export async function fetchUserHistory(): Promise<SavedConflictRecord[]> {

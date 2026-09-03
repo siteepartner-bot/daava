@@ -58,8 +58,8 @@ export const InputStoryView: React.FC<InputStoryViewProps> = ({
     if (isSubmitting) return;
 
     const cleanText = storyText.trim();
-    if (!cleanText || cleanText.length < 10) {
-      setErrorMessage('برای اینکه هوش مصنوعی بتونه دقیق تحلیلش کنه، لطفاً کمی بیشتر توضیح بده (حداقل ۱۰ کاراکتر) 🤍');
+    if (!cleanText || cleanText.length < 20) {
+      setErrorMessage('یکم بیشتر برام تعریف کن تا بهتر بتونم کمکت کنم 🤍');
       return;
     }
 

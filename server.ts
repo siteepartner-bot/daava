@@ -343,10 +343,10 @@ async function startServer() {
         return;
       }
 
-      if (!password || typeof password !== 'string' || password.length < 4) {
+      if (!password || typeof password !== 'string' || password.length < 8) {
         res.status(400).json({
           error: 'INVALID_PASSWORD',
-          message: 'رمز عبور باید حداقل ۴ کاراکتر باشد.',
+          message: 'رمز عبور باید حداقل ۸ کاراکتر باشد.',
         });
         return;
       }
@@ -621,10 +621,10 @@ async function startServer() {
     try {
       const { story, category, emotion, gender } = req.body;
 
-      if (!story || typeof story !== 'string' || story.trim().length < 10) {
+      if (!story || typeof story !== 'string' || story.trim().length < 20) {
         res.status(400).json({
           error: 'INVALID_INPUT',
-          message: 'برای اینکه هوش مصنوعی بتونه دقیق تحلیلش کنه، لطفاً کمی بیشتر توضیح بده (حداقل ۱۰ کاراکتر) 🤍',
+          message: 'لطفاً شرح ماجرا را حداقل در ۲۰ کاراکتر وارد کنید.',
         });
         return;
       }
@@ -1301,10 +1301,10 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       const sessionIdOrCode = req.params.id;
       const { token, role, name, story, category, emotion, gender } = req.body || {};
 
-      if (!story || typeof story !== 'string' || story.trim().length < 10) {
+      if (!story || typeof story !== 'string' || story.trim().length < 20) {
         res.status(400).json({
           error: 'INVALID_STORY',
-          message: 'برای اینکه هوش مصنوعی بتونه دقیق تحلیلش کنه، لطفاً کمی بیشتر توضیح بده (حداقل ۱۰ کاراکتر) 🤍',
+          message: 'یکم بیشتر برامون تعریف کن تا بهتر بفهمیم 🤍 (حداقل ۲۰ کاراکتر)',
         });
         return;
       }

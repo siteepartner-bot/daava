@@ -51,7 +51,6 @@ import {
 import {
   User,
   UserStats,
-  getInitialCachedUser,
   fetchCurrentUserProfile,
   getUserHistoryFromApi,
   saveAnalysisToApi,
@@ -87,8 +86,8 @@ export default function App() {
   const [aboutModalTab, setAboutModalTab] = useState<'how-it-works' | 'about-us' | 'privacy'>('how-it-works');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // User & Auth state (synchronous initial load from local device storage)
-  const [user, setUser] = useState<User | null>(() => getInitialCachedUser());
+  // User & Auth state
+  const [user, setUser] = useState<User | null>(null);
   const [userStats, setUserStats] = useState<UserStats | null>(null);
 
   // Load history & check user session on initial render

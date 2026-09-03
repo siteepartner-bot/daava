@@ -50,8 +50,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
       return;
     }
 
-    if (!password || password.length < 4) {
-      setError('رمز عبور باید حداقل ۴ کاراکتر باشد.');
+    if (!password || password.length < 8) {
+      setError('رمز عبور باید حداقل ۸ کاراکتر باشد.');
       return;
     }
 
@@ -108,8 +108,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
         </h1>
         <p className="text-sm text-slate-600">
           {mode === 'login'
-            ? 'برای دسترسی به تحلیل‌های ذخیره شده و جلسات خود وارد شوید'
-            : 'با ایجاد حساب، تمامی تحلیل‌های شما به‌صورت دائمی و امن ذخیره می‌شوند'}
+            ? 'برای دسترسی به تحلیلهای ذخیره شده و جلسات خود وارد شوید'
+            : 'با ایجاد حساب، تمامی تحلیلهای شما بهصورت دائمی و امن ذخیره می‌شوند'}
         </p>
       </div>
 
@@ -142,7 +142,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            ثبت‌نام
+            ثبتنام
           </button>
         </div>
 
@@ -207,7 +207,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 dir="ltr"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="حداقل ۴ کاراکتر"
+                placeholder="حداقل ۸ کاراکتر"
                 className="w-full pr-10 pl-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all text-slate-800 text-left"
                 required
               />
@@ -234,7 +234,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
         </form>
 
         <p className="text-center text-xs text-slate-500 pt-2 border-t border-slate-100">
-          با ورود یا ثبت‌نام، اطلاعات شما با بالاترین ضوابط حریم خصوصی حفاظت خواهد شد.
+          با ورود یا ثبتنام، اطلاعات شما با بالاترین ضوابط حریم خصوصی حفاظت خواهد شد.
         </p>
       </Card>
     </motion.div>

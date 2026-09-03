@@ -42,11 +42,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const body = (await context.request.json().catch(() => ({}))) as any;
     const { story, category, emotion, gender } = body;
 
-    if (!story || typeof story !== 'string' || story.trim().length < 10) {
+    if (!story || typeof story !== 'string' || story.trim().length < 20) {
       return new Response(
         JSON.stringify({
           error: 'INVALID_INPUT',
-          message: 'برای اینکه هوش مصنوعی بتونه دقیق تحلیلش کنه، لطفاً کمی بیشتر توضیح بده (حداقل ۱۰ کاراکتر) 🤍',
+          message: 'متن ماجرا باید حداقل ۲۰ کاراکتر داشته باشد.',
         }),
         {
           status: 400,
