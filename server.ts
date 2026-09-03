@@ -989,9 +989,31 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     analyzedAt?: number;
   }
 
-  // In-memory sessions map
+  // In-memory sessions map with DB persistence fallback
   const coupleSessions = new Map<string, CoupleSessionServerRecord>();
   const joinCodeToSessionId = new Map<string, string>();
+
+  function findSessionByIdOrCode(idOrCode: string): CoupleSessionServerRecord | undefined {
+    if (!idOrCode) return undefined;
+    const lookupKey = idOrCode.trim().toUpperCase();
+    let sessionId = joinCodeToSessionId.get(lookupKey) || idOrCode.trim();
+    let session = coupleSessions.get(sessionId);
+
+    if (!session) {
+      session = db.findCoupleSession(idOrCode);
+      if (session) {
+        coupleSessions.set(session.id, session);
+        joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);
+      }
+    }
+    return session;
+  }
+
+  function persistSession(session: CoupleSessionServerRecord): void {
+    coupleSessions.set(session.id, session);
+    joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);
+    db.saveCoupleSession(session);
+  }
 
   function generateJoinCode(): string {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -1000,7 +1022,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       for (let i = 0; i < 6; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      if (!joinCodeToSessionId.has(code)) {
+      if (!joinCodeToSessionId.has(code) && !db.findCoupleSession(code)) {
         return code;
       }
     }
@@ -1063,6 +1085,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       if (s.expiresAt < now) {
         joinCodeToSessionId.delete(s.joinCode);
         coupleSessions.delete(id);
+        db.deleteCoupleSession(id);
       }
     }
   }, 30 * 60 * 1000);
@@ -1105,8 +1128,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         participantB: null,
       };
 
-      coupleSessions.set(sessionId, sessionRecord);
-      joinCodeToSessionId.set(joinCode.toUpperCase(), sessionId);
+      persistSession(sessionRecord);
 
       res.json({
         success: true,
@@ -1136,20 +1158,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = joinCodeOrId.trim().toUpperCase();
-      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
-      let session = coupleSessions.get(sessionId);
-
-      if (!session && lookupKey.length === 6) {
-        // Try finding by joinCode in case map had casing differences
-        for (const s of coupleSessions.values()) {
-          if (s.joinCode.toUpperCase() === lookupKey) {
-            session = s;
-            sessionId = s.id;
-            break;
-          }
-        }
-      }
+      const session = findSessionByIdOrCode(joinCodeOrId);
 
       if (!session) {
         res.status(404).json({
@@ -1167,18 +1176,30 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
+      const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
+      const now = Date.now();
+
       // Check if existing participant is re-joining with token
       if (existingToken) {
         if (session.participantA.token === existingToken) {
-          res.json({
-            success: true,
-            session: sanitizeSessionForPublic(session, 'participantA'),
-            token: existingToken,
-            role: 'participantA',
-          });
-          return;
-        }
-        if (session.participantB && session.participantB.token === existingToken) {
+          // If participantB does not exist yet AND user entered a name distinct from participantA's name,
+          // create participantB instead of returning participantA
+          if (!session.participantB && cleanName && cleanName !== 'همراه' && cleanName.toLowerCase() !== session.participantA.name.toLowerCase()) {
+            // Fall through to create Participant B
+          } else {
+            res.json({
+              success: true,
+              session: sanitizeSessionForPublic(session, 'participantA'),
+              token: existingToken,
+              role: 'participantA',
+            });
+            return;
+          }
+        } else if (session.participantB && session.participantB.token === existingToken) {
+          if (cleanName && cleanName !== 'همراه' && !session.participantB.completed) {
+            session.participantB.name = cleanName;
+            persistSession(session);
+          }
           res.json({
             success: true,
             session: sanitizeSessionForPublic(session, 'participantB'),
@@ -1188,9 +1209,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           return;
         }
       }
-
-      const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
-      const now = Date.now();
 
       // If participantB doesn't exist yet, create participantB
       if (!session.participantB) {
@@ -1203,6 +1221,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           createdAt: now,
         };
         session.updatedAt = now;
+        persistSession(session);
 
         res.json({
           success: true,
@@ -1213,21 +1232,12 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      // If participantB already exists but not completed or updating name
-      if (!session.participantB.completed) {
-        if (cleanName && cleanName !== 'همراه') {
-          session.participantB.name = cleanName;
-        }
-        res.json({
-          success: true,
-          session: sanitizeSessionForPublic(session, 'participantB'),
-          token: session.participantB.token,
-          role: 'participantB',
-        });
-        return;
+      // If participantB already exists
+      if (!session.participantB.completed && cleanName && cleanName !== 'همراه') {
+        session.participantB.name = cleanName;
+        persistSession(session);
       }
 
-      // If both completed or already has participantB with another token
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, 'participantB'),
@@ -1252,9 +1262,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           (req.query.token as string) ||
           '').trim();
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = findSessionByIdOrCode(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({
@@ -1309,9 +1317,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = findSessionByIdOrCode(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({
@@ -1399,6 +1405,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         session.status = 'participant_b_completed';
       }
 
+      persistSession(session);
+
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, targetRole),
@@ -1416,13 +1424,11 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-
-      const session = coupleSessions.get(sessionId);
+      const session = findSessionByIdOrCode(sessionIdOrCode);
       if (session) {
         joinCodeToSessionId.delete(session.joinCode.toUpperCase());
-        coupleSessions.delete(sessionId);
+        coupleSessions.delete(session.id);
+        db.deleteCoupleSession(session.id);
       }
 
       res.json({ success: true, message: 'از جلسه خارج شدید.' });
@@ -1450,9 +1456,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = findSessionByIdOrCode(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({

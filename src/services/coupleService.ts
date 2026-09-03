@@ -3,7 +3,6 @@ import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
 const SESSION_STORAGE_KEY = 'aramkon_active_couple_session';
 
 function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
-  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
     savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
@@ -13,21 +12,13 @@ function getApiEndpoints(route: string): { primary: string; fallback: string | n
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
   let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
+  let fallbackEndpoint: string | null = null;
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
     primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
       ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
       : `${cleanUrl}${route}`;
-    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-  } else if (
-    typeof window !== 'undefined' &&
-    (window.location.hostname.includes('workers.dev') ||
-      window.location.hostname.includes('pages.dev'))
-  ) {
-    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-    fallbackEndpoint = route;
   }
 
   return { primary: primaryEndpoint, fallback: fallbackEndpoint };

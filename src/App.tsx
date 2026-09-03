@@ -127,7 +127,16 @@ export default function App() {
       }
 
       if (code) {
-        setUrlJoinCode(code.toUpperCase());
+        const cleanCode = code.toUpperCase();
+        setUrlJoinCode(cleanCode);
+
+        const cachedAuth = getActiveSessionAuth();
+        if (cachedAuth && cachedAuth.joinCode !== cleanCode) {
+          clearActiveSessionAuth();
+          setCoupleAuth(null);
+          setCoupleSession(null);
+        }
+
         setCurrentView('couple-join');
         return;
       }

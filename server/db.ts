@@ -19,6 +19,32 @@ export interface AuthSessionRecord {
   expiresAt: number;
 }
 
+export interface ParticipantRecord {
+  id: string;
+  name: string;
+  token: string;
+  story?: string;
+  category?: string | null;
+  emotion?: string | null;
+  gender?: string | null;
+  completed: boolean;
+  completedAt?: number;
+  createdAt: number;
+}
+
+export interface CoupleSessionServerRecord {
+  id: string;
+  joinCode: string;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+  status: 'waiting' | 'participant_a_completed' | 'participant_b_completed' | 'ready_for_analysis' | 'expired';
+  participantA: ParticipantRecord;
+  participantB?: ParticipantRecord | null;
+  sharedAnalysis?: any;
+  analyzedAt?: number;
+}
+
 export interface PersonalAnalysisRecord {
   id: string;
   userId: string;
@@ -35,6 +61,7 @@ interface DbSchema {
   users: UserRecord[];
   sessions: AuthSessionRecord[];
   personalAnalyses: PersonalAnalysisRecord[];
+  coupleSessions: CoupleSessionServerRecord[];
 }
 
 const DB_DIR = path.join(process.cwd(), 'data');
@@ -44,6 +71,7 @@ let dbData: DbSchema = {
   users: [],
   sessions: [],
   personalAnalyses: [],
+  coupleSessions: [],
 };
 
 // Ensure database directory and file exist
@@ -59,6 +87,7 @@ function initDb() {
         users: Array.isArray(parsed.users) ? parsed.users : [],
         sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
         personalAnalyses: Array.isArray(parsed.personalAnalyses) ? parsed.personalAnalyses : [],
+        coupleSessions: Array.isArray(parsed.coupleSessions) ? parsed.coupleSessions : [],
       };
     } else {
       saveDbSync();
@@ -261,5 +290,28 @@ export const db = {
       }
     }
     return db.getUserAnalyses(userId);
+  },
+
+  // Couple Sessions
+  findCoupleSession(idOrCode: string): CoupleSessionServerRecord | undefined {
+    if (!idOrCode) return undefined;
+    const lookupKey = idOrCode.trim().toUpperCase();
+    return dbData.coupleSessions.find((s) => s.id === idOrCode || s.joinCode.toUpperCase() === lookupKey);
+  },
+
+  saveCoupleSession(session: CoupleSessionServerRecord): CoupleSessionServerRecord {
+    const existingIndex = dbData.coupleSessions.findIndex((s) => s.id === session.id);
+    if (existingIndex >= 0) {
+      dbData.coupleSessions[existingIndex] = session;
+    } else {
+      dbData.coupleSessions.unshift(session);
+    }
+    queueSaveDb();
+    return session;
+  },
+
+  deleteCoupleSession(sessionId: string): void {
+    dbData.coupleSessions = dbData.coupleSessions.filter((s) => s.id !== sessionId);
+    queueSaveDb();
   },
 };
