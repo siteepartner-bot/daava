@@ -1,17 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { AppView } from '../types';
 import { Button } from './Button';
-import { Sparkles, History, Settings, User as UserIcon, ShieldCheck } from 'lucide-react';
-import { User } from '../services/authService';
+import { Sparkles, History, Settings, CheckCircle2, Server } from 'lucide-react';
 
 interface HeaderProps {
   currentView: AppView;
-  user: User | null;
   onNavigate: (view: AppView) => void;
   onOpenAbout: (tab?: 'how-it-works' | 'about-us' | 'privacy') => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, onOpenAbout }) => {
+export const Header: React.FC<HeaderProps> = ({ currentView, onNavigate, onOpenAbout }) => {
   const [hasCustomWorker, setHasCustomWorker] = useState(false);
 
   useEffect(() => {
@@ -72,38 +70,9 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
               }`}
             >
               <Settings className="w-4 h-4" />
-              <span>تنظیمات</span>
+              <span>تنظیمات ورکر</span>
             </button>
           </nav>
-
-          {/* User Account / Login Button */}
-          {user ? (
-            <button
-              onClick={() => onNavigate('profile')}
-              className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-semibold ${
-                currentView === 'profile'
-                  ? 'bg-indigo-100 border-indigo-300 text-indigo-800'
-                  : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50 shadow-xs'
-              }`}
-            >
-              <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold">
-                {user.name ? user.name.charAt(0).toUpperCase() : '👤'}
-              </div>
-              <span className="max-w-[80px] sm:max-w-[120px] truncate">{user.name}</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => onNavigate('auth')}
-              className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1 text-xs font-medium ${
-                currentView === 'auth'
-                  ? 'bg-purple-100 border-purple-300 text-purple-800 font-semibold'
-                  : 'bg-white border-purple-200 text-slate-700 hover:bg-purple-50'
-              }`}
-            >
-              <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
-              <span>ورود / ثبت‌نام</span>
-            </button>
-          )}
 
           {/* Quick Settings Icon button on Mobile & Tablet */}
           <button
@@ -116,6 +85,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
             }`}
           >
             <Settings className="w-4 h-4 text-purple-600" />
+            <span className="hidden sm:inline">تنظیمات</span>
           </button>
 
           {currentView === 'landing' ? (

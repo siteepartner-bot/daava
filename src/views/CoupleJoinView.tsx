@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { HeartHandshake, ArrowLeft, ArrowRight, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
+import { HeartHandshake, ArrowLeft, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
@@ -8,31 +8,21 @@ import { joinCoupleSession } from '../services/coupleService';
 
 interface CoupleJoinViewProps {
   initialCode?: string;
-  roomNotFound?: boolean;
-  isVerifyingRoom?: boolean;
-  session?: CoupleSessionPublicState | null;
   onJoined: (session: CoupleSessionPublicState, auth: LocalCoupleSessionAuth) => void;
   onBack: () => void;
-  onCreateNewRoom?: () => void;
   onNotify: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export const CoupleJoinView: React.FC<CoupleJoinViewProps> = ({
   initialCode = '',
-  roomNotFound = false,
-  isVerifyingRoom = false,
-  session = null,
   onJoined,
   onBack,
-  onCreateNewRoom,
   onNotify,
 }) => {
   const [name, setName] = useState('');
   const [code, setCode] = useState(initialCode);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-
-  const creatorName = session?.participantA?.name || '';
 
   const handleJoin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,55 +91,13 @@ export const CoupleJoinView: React.FC<CoupleJoinViewProps> = ({
         <h2 className="text-2xl sm:text-3xl font-extrabold text-[#2D2A32]">
           به جلسه دعوت شدی 🤍
         </h2>
-
-        {creatorName && (
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-purple-50 text-purple-700 rounded-full text-xs font-medium border border-purple-200">
-            <span>دعوت‌شده توسط</span>
-            <span className="font-bold">{creatorName}</span>
-          </div>
-        )}
-
         <p className="text-xs sm:text-sm text-[#64748B] max-w-md mx-auto leading-relaxed">
           قبل از اینکه چیزی از جواب طرف مقابل ببینی، اول دیدگاه خودت رو بنویس.
         </p>
       </div>
 
-      {/* Loading / Verifying Room Card */}
-      {isVerifyingRoom ? (
-        <Card className="border-purple-200 bg-white p-8 text-center space-y-4 shadow-sm">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
-            <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-base font-bold text-gray-800">در حال بررسی اطلاعات جلسه...</h3>
-            <p className="text-xs text-gray-500">لطفاً چند لحظه شکیبا باشید 🤍</p>
-          </div>
-        </Card>
-      ) : roomNotFound ? (
-        <Card className="border-rose-200 bg-white p-6 md:p-8 text-center space-y-5">
-          <div className="w-12 h-12 mx-auto rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
-            <AlertCircle className="w-6 h-6" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-bold text-gray-800">اتاق یا جلسه پیدا نشد</h3>
-            <p className="text-xs text-gray-500 max-w-sm mx-auto leading-relaxed">
-              جلسه‌ای با این کد یا لینک دعوت در سرور یافت نشد. ممکن است زمان آن منقضی شده باشد یا کد را اشتباه وارد کرده باشید.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3 pt-2 justify-center">
-            {onCreateNewRoom && (
-              <Button onClick={onCreateNewRoom} variant="primary" size="md">
-                ایجاد جلسه جدید دونفره
-              </Button>
-            )}
-            <Button onClick={onBack} variant="outline" size="md">
-              بازگشت به صفحه اصلی
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        /* Join Card */
-        <Card className="border-purple-200 bg-white p-6 md:p-8 space-y-6">
+      {/* Join Card */}
+      <Card className="border-purple-200 bg-white p-6 md:p-8 space-y-6">
         <form onSubmit={handleJoin} className="space-y-5">
           {/* Join Code Input if not present or editable */}
           <div>
@@ -221,7 +169,6 @@ export const CoupleJoinView: React.FC<CoupleJoinViewProps> = ({
           </span>
         </div>
       </Card>
-      )}
     </div>
   );
 };

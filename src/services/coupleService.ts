@@ -3,6 +3,7 @@ import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
 const SESSION_STORAGE_KEY = 'aramkon_active_couple_session';
 
 function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
+  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
     savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
@@ -12,18 +13,21 @@ function getApiEndpoints(route: string): { primary: string; fallback: string | n
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
   let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = null;
+  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
-    const baseWorker = cleanUrl.replace(/\/api\/[a-z-]+$/, '');
-    primaryEndpoint = `${baseWorker}${route}`;
-    fallbackEndpoint = route; // Fallback to current domain relative endpoint
-  } else if (metaEnv?.VITE_WORKER_API_URL) {
-    const cleanUrl = metaEnv.VITE_WORKER_API_URL.trim().replace(/\/+$/, '');
-    const baseWorker = cleanUrl.replace(/\/api\/[a-z-]+$/, '');
-    primaryEndpoint = route;
-    fallbackEndpoint = `${baseWorker}${route}`;
+    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
+      ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
+      : `${cleanUrl}${route}`;
+    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+  } else if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('workers.dev') ||
+      window.location.hostname.includes('pages.dev'))
+  ) {
+    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+    fallbackEndpoint = route;
   }
 
   return { primary: primaryEndpoint, fallback: fallbackEndpoint };
@@ -43,9 +47,10 @@ async function fetchWithFallback(
     lastError = err;
   }
 
-  if ((!response || !response.ok || response.status === 404) && fallback && fallback !== primary) {
+  if ((!response || !response.ok) && fallback && fallback !== primary) {
     try {
-      const fbResponse = await fetch(fallback, options);
+      const fallbackUrl = fallback.startsWith('http') ? fallback : fallback;
+      const fbResponse = await fetch(fallbackUrl, options);
       if (fbResponse.ok || !response) {
         return fbResponse;
       }

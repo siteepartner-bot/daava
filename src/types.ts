@@ -13,9 +13,7 @@ export type AppView =
   | 'couple-comparison'
   | 'ending'
   | 'history'
-  | 'settings'
-  | 'auth'
-  | 'profile';
+  | 'settings';
 
 export type AnalysisMode = 'solo' | 'couple';
 

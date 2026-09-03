@@ -1,66 +1,11 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
-import { db, hashPassword, UserRecord } from './server/db';
 
 dotenv.config();
 
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-
-// Rate limiting map
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-
-function rateLimiter(maxRequests: number, windowMs: number) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    const clientIp =
-      (req.headers['x-forwarded-for'] as string)?.split(',')[0] ||
-      req.socket.remoteAddress ||
-      'unknown';
-    const now = Date.now();
-    let record = rateLimitMap.get(clientIp);
-
-    if (!record || now > record.resetAt) {
-      record = { count: 1, resetAt: now + windowMs };
-      rateLimitMap.set(clientIp, record);
-      return next();
-    }
-
-    if (record.count >= maxRequests) {
-      res.status(429).json({
-        error: 'RATE_LIMIT_EXCEEDED',
-        message: 'تعداد درخواست‌های شما بیش از حد مجاز است. لطفاً چند لحظه صبر کنید 🤍',
-      });
-      return;
-    }
-
-    record.count++;
-    next();
-  };
-}
-
-// Authentication middleware
-function getAuthUserFromHeader(req: Request): UserRecord | null {
-  const authHeader = req.headers.authorization;
-  const token = authHeader && authHeader.replace(/^Bearer\s+/i, '').trim();
-  if (!token) return null;
-  const session = db.findSession(token);
-  if (!session) return null;
-  return db.findUserById(session.userId) || null;
-}
-
-function authenticateToken(req: Request, res: Response, next: NextFunction) {
-  const user = getAuthUserFromHeader(req);
-  if (!user) {
-    res.status(401).json({
-      error: 'UNAUTHORIZED',
-      message: 'برای دسترسی به این بخش، ابتدا وارد حسابت شو 🤍',
-    });
-    return;
-  }
-  (req as any).user = user;
-  next();
-}
 
 function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -312,308 +257,6 @@ async function startServer() {
       status: 'ok',
       hasApiKey: Boolean(process.env.GEMINI_API_KEY),
     });
-  });
-
-  // --- Rate Limiting for sensitive routes ---
-  app.use('/api/auth', rateLimiter(20, 60 * 1000));
-  app.use('/api/analyze', rateLimiter(20, 60 * 1000));
-  app.use('/api/couple/create', rateLimiter(20, 60 * 1000));
-
-  // --- Auth Endpoints ---
-
-  // 1. Register
-  app.post('/api/auth/register', (req: Request, res: Response): void => {
-    try {
-      const { name, email, password } = req.body || {};
-
-      if (!name || typeof name !== 'string' || name.trim().length < 2) {
-        res.status(400).json({
-          error: 'INVALID_NAME',
-          message: 'لطفاً نام یا لقب خود را وارد کنید.',
-        });
-        return;
-      }
-
-      const cleanEmail = (email || '').trim().toLowerCase();
-      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        res.status(400).json({
-          error: 'INVALID_EMAIL',
-          message: 'ایمیل واردشده درست نیست.',
-        });
-        return;
-      }
-
-      if (!password || typeof password !== 'string' || password.length < 8) {
-        res.status(400).json({
-          error: 'INVALID_PASSWORD',
-          message: 'رمز عبور باید حداقل ۸ کاراکتر باشد.',
-        });
-        return;
-      }
-
-      const user = db.createUser(name, cleanEmail, password);
-      const session = db.createAuthSession(user.id);
-
-      const personalAnalyses = db.getUserAnalyses(user.id);
-
-      res.json({
-        success: true,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          createdAt: user.createdAt,
-        },
-        token: session.token,
-        stats: {
-          personalAnalysesCount: personalAnalyses.length,
-          coupleSessionsCount: 0,
-        },
-      });
-    } catch (error: any) {
-      res.status(400).json({
-        error: 'REGISTER_FAILED',
-        message: error?.message || 'خطا در ثبت‌نام. لطفاً دوباره تلاش کنید.',
-      });
-    }
-  });
-
-  // 2. Login
-  app.post('/api/auth/login', (req: Request, res: Response): void => {
-    try {
-      const { email, password } = req.body || {};
-
-      const cleanEmail = (email || '').trim().toLowerCase();
-      if (!cleanEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-        res.status(400).json({
-          error: 'INVALID_EMAIL',
-          message: 'ایمیل واردشده درست نیست.',
-        });
-        return;
-      }
-
-      if (!password || typeof password !== 'string') {
-        res.status(400).json({
-          error: 'INVALID_PASSWORD',
-          message: 'لطفاً رمز عبور را وارد کنید.',
-        });
-        return;
-      }
-
-      const user = db.findUserByEmail(cleanEmail);
-      if (!user) {
-        res.status(400).json({
-          error: 'INVALID_CREDENTIALS',
-          message: 'ایمیل یا رمز عبور اشتباه است.',
-        });
-        return;
-      }
-
-      const { hash } = hashPassword(password, user.salt);
-      if (hash !== user.passwordHash) {
-        res.status(400).json({
-          error: 'INVALID_CREDENTIALS',
-          message: 'ایمیل یا رمز عبور اشتباه است.',
-        });
-        return;
-      }
-
-      const session = db.createAuthSession(user.id);
-      const personalAnalyses = db.getUserAnalyses(user.id);
-
-      res.json({
-        success: true,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          createdAt: user.createdAt,
-        },
-        token: session.token,
-        stats: {
-          personalAnalysesCount: personalAnalyses.length,
-          coupleSessionsCount: 0,
-        },
-      });
-    } catch (error: any) {
-      res.status(400).json({
-        error: 'LOGIN_FAILED',
-        message: 'خطا در ورود به حساب. لطفاً دوباره تلاش کنید.',
-      });
-    }
-  });
-
-  // 3. Get Current User Profile (me)
-  app.get('/api/auth/me', authenticateToken, (req: Request, res: Response): void => {
-    const user = (req as any).user as UserRecord;
-    const personalAnalyses = db.getUserAnalyses(user.id);
-
-    res.json({
-      success: true,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        createdAt: user.createdAt,
-      },
-      stats: {
-        personalAnalysesCount: personalAnalyses.length,
-        coupleSessionsCount: 0,
-      },
-    });
-  });
-
-  // 4. Update Profile (Name)
-  app.post('/api/auth/profile', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      const { name } = req.body || {};
-
-      if (!name || typeof name !== 'string' || name.trim().length < 2) {
-        res.status(400).json({
-          error: 'INVALID_NAME',
-          message: 'لطفاً نام را به درستی وارد کنید.',
-        });
-        return;
-      }
-
-      const updated = db.updateUserName(user.id, name);
-      res.json({
-        success: true,
-        user: {
-          id: updated.id,
-          name: updated.name,
-          email: updated.email,
-          createdAt: updated.createdAt,
-        },
-      });
-    } catch (error: any) {
-      res.status(400).json({
-        error: 'PROFILE_UPDATE_FAILED',
-        message: error?.message || 'خطا در بروزرسانی نام.',
-      });
-    }
-  });
-
-  // 5. Delete Account
-  app.delete('/api/auth/account', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      db.deleteUser(user.id);
-      res.json({
-        success: true,
-        message: 'حساب کاربری با موفقیت حذف شد.',
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        error: 'ACCOUNT_DELETE_FAILED',
-        message: 'خطا در حذف حساب کاربری.',
-      });
-    }
-  });
-
-  // 6. Logout
-  app.post('/api/auth/logout', (req: Request, res: Response): void => {
-    const authHeader = req.headers.authorization;
-    const token = authHeader && authHeader.replace(/^Bearer\s+/i, '').trim();
-    if (token) {
-      db.deleteSession(token);
-    }
-    res.json({ success: true });
-  });
-
-  // --- History Endpoints ---
-
-  // Get user history
-  app.get('/api/history', authenticateToken, (req: Request, res: Response): void => {
-    const user = (req as any).user as UserRecord;
-    const analyses = db.getUserAnalyses(user.id);
-    res.json({
-      success: true,
-      history: analyses,
-    });
-  });
-
-  // Sync client local storage history
-  app.post('/api/history/sync', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      const { items } = req.body || {};
-      const synced = db.syncLocalAnalyses(user.id, items || []);
-      res.json({
-        success: true,
-        history: synced,
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        error: 'SYNC_FAILED',
-        message: 'خطا در همگام‌سازی تاریخچه.',
-      });
-    }
-  });
-
-  // Save single personal analysis
-  app.post('/api/history/save', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      const { id, story, category, emotion, gender, analysis } = req.body || {};
-
-      if (!story || !analysis) {
-        res.status(400).json({
-          error: 'INVALID_DATA',
-          message: 'اطلاعات تحلیل ناقص است.',
-        });
-        return;
-      }
-
-      const record = db.saveAnalysis(user.id, {
-        id,
-        story,
-        category: category || 'رابطه',
-        emotion: emotion || 'ناراحت',
-        gender,
-        analysis,
-      });
-
-      res.json({
-        success: true,
-        record,
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        error: 'SAVE_FAILED',
-        message: 'خطا در ذخیره‌سازی تحلیل.',
-      });
-    }
-  });
-
-  // Delete single history item
-  app.delete('/api/history/:id', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      const id = req.params.id;
-      db.deleteAnalysis(user.id, id);
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({
-        error: 'DELETE_FAILED',
-        message: 'خطا در حذف تحلیل.',
-      });
-    }
-  });
-
-  // Clear all history for user
-  app.delete('/api/history/clear', authenticateToken, (req: Request, res: Response): void => {
-    try {
-      const user = (req as any).user as UserRecord;
-      db.clearUserAnalyses(user.id);
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({
-        error: 'CLEAR_FAILED',
-        message: 'خطا در پاکسازی تاریخچه.',
-      });
-    }
   });
 
   // Main Gemini Conflict Analysis Endpoint
@@ -989,44 +632,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     analyzedAt?: number;
   }
 
-  // In-memory sessions map with DB persistence fallback
+  // In-memory sessions map
   const coupleSessions = new Map<string, CoupleSessionServerRecord>();
   const joinCodeToSessionId = new Map<string, string>();
-
-  function findSessionByIdOrCode(idOrCode: string): CoupleSessionServerRecord | undefined {
-    if (!idOrCode) return undefined;
-    const rawKey = idOrCode.trim();
-    const upperKey = rawKey.toUpperCase();
-
-    let sessionId = joinCodeToSessionId.get(upperKey) || rawKey;
-    let session = coupleSessions.get(sessionId) || coupleSessions.get(sessionId.toLowerCase());
-
-    if (!session) {
-      for (const s of coupleSessions.values()) {
-        if (s.id.toUpperCase() === upperKey || s.joinCode.toUpperCase() === upperKey) {
-          session = s;
-          coupleSessions.set(s.id, s);
-          joinCodeToSessionId.set(s.joinCode.toUpperCase(), s.id);
-          break;
-        }
-      }
-    }
-
-    if (!session) {
-      session = db.findCoupleSession(rawKey);
-      if (session) {
-        coupleSessions.set(session.id, session);
-        joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);
-      }
-    }
-    return session;
-  }
-
-  function persistSession(session: CoupleSessionServerRecord): void {
-    coupleSessions.set(session.id, session);
-    joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);
-    db.saveCoupleSession(session);
-  }
 
   function generateJoinCode(): string {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -1035,7 +643,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       for (let i = 0; i < 6; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
       }
-      if (!joinCodeToSessionId.has(code) && !db.findCoupleSession(code)) {
+      if (!joinCodeToSessionId.has(code)) {
         return code;
       }
     }
@@ -1098,7 +706,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       if (s.expiresAt < now) {
         joinCodeToSessionId.delete(s.joinCode);
         coupleSessions.delete(id);
-        db.deleteCoupleSession(id);
       }
     }
   }, 30 * 60 * 1000);
@@ -1141,7 +748,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         participantB: null,
       };
 
-      persistSession(sessionRecord);
+      coupleSessions.set(sessionId, sessionRecord);
+      joinCodeToSessionId.set(joinCode.toUpperCase(), sessionId);
 
       res.json({
         success: true,
@@ -1171,7 +779,20 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const session = findSessionByIdOrCode(joinCodeOrId);
+      const lookupKey = joinCodeOrId.trim().toUpperCase();
+      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
+      let session = coupleSessions.get(sessionId);
+
+      if (!session && lookupKey.length === 6) {
+        // Try finding by joinCode in case map had casing differences
+        for (const s of coupleSessions.values()) {
+          if (s.joinCode.toUpperCase() === lookupKey) {
+            session = s;
+            sessionId = s.id;
+            break;
+          }
+        }
+      }
 
       if (!session) {
         res.status(404).json({
@@ -1189,30 +810,18 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
-      const now = Date.now();
-
       // Check if existing participant is re-joining with token
       if (existingToken) {
         if (session.participantA.token === existingToken) {
-          // If participantB does not exist yet AND user entered a name distinct from participantA's name,
-          // create participantB instead of returning participantA
-          if (!session.participantB && cleanName && cleanName !== 'همراه' && cleanName.toLowerCase() !== session.participantA.name.toLowerCase()) {
-            // Fall through to create Participant B
-          } else {
-            res.json({
-              success: true,
-              session: sanitizeSessionForPublic(session, 'participantA'),
-              token: existingToken,
-              role: 'participantA',
-            });
-            return;
-          }
-        } else if (session.participantB && session.participantB.token === existingToken) {
-          if (cleanName && cleanName !== 'همراه' && !session.participantB.completed) {
-            session.participantB.name = cleanName;
-            persistSession(session);
-          }
+          res.json({
+            success: true,
+            session: sanitizeSessionForPublic(session, 'participantA'),
+            token: existingToken,
+            role: 'participantA',
+          });
+          return;
+        }
+        if (session.participantB && session.participantB.token === existingToken) {
           res.json({
             success: true,
             session: sanitizeSessionForPublic(session, 'participantB'),
@@ -1222,6 +831,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           return;
         }
       }
+
+      const cleanName = (typeof name === 'string' && name.trim()) || 'همراه';
+      const now = Date.now();
 
       // If participantB doesn't exist yet, create participantB
       if (!session.participantB) {
@@ -1234,7 +846,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           createdAt: now,
         };
         session.updatedAt = now;
-        persistSession(session);
 
         res.json({
           success: true,
@@ -1245,12 +856,21 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      // If participantB already exists
-      if (!session.participantB.completed && cleanName && cleanName !== 'همراه') {
-        session.participantB.name = cleanName;
-        persistSession(session);
+      // If participantB already exists but not completed or updating name
+      if (!session.participantB.completed) {
+        if (cleanName && cleanName !== 'همراه') {
+          session.participantB.name = cleanName;
+        }
+        res.json({
+          success: true,
+          session: sanitizeSessionForPublic(session, 'participantB'),
+          token: session.participantB.token,
+          role: 'participantB',
+        });
+        return;
       }
 
+      // If both completed or already has participantB with another token
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, 'participantB'),
@@ -1267,7 +887,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 3. Get Session Status (Polling)
-  app.get(['/api/couple/:id', '/api/couple/room/:id', '/api/room/:id'], (req: Request, res: Response): void => {
+  app.get('/api/couple/:id', (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
       const token =
@@ -1275,7 +895,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           (req.query.token as string) ||
           '').trim();
 
-      const session = findSessionByIdOrCode(sessionIdOrCode);
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({
@@ -1317,7 +939,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 4. Submit Participant Story
-  app.post(['/api/couple/:id/submit', '/api/couple/room/:id/submit', '/api/room/:id/submit'], (req: Request, res: Response): void => {
+  app.post('/api/couple/:id/submit', (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
       const { token, role, name, story, category, emotion, gender } = req.body || {};
@@ -1330,7 +952,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const session = findSessionByIdOrCode(sessionIdOrCode);
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({
@@ -1418,8 +1042,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         session.status = 'participant_b_completed';
       }
 
-      persistSession(session);
-
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, targetRole),
@@ -1434,14 +1056,16 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 5. Leave / Delete Couple Session
-  app.post(['/api/couple/:id/leave', '/api/couple/room/:id/leave', '/api/room/:id/leave'], (req: Request, res: Response): void => {
+  app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
-      const session = findSessionByIdOrCode(sessionIdOrCode);
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+
+      const session = coupleSessions.get(sessionId);
       if (session) {
         joinCodeToSessionId.delete(session.joinCode.toUpperCase());
-        coupleSessions.delete(session.id);
-        db.deleteCoupleSession(session.id);
+        coupleSessions.delete(sessionId);
       }
 
       res.json({ success: true, message: 'از جلسه خارج شدید.' });
@@ -1469,7 +1093,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const session = findSessionByIdOrCode(sessionIdOrCode);
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({

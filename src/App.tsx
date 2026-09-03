@@ -21,8 +21,6 @@ import { CoupleComparisonView } from './views/CoupleComparisonView';
 import { EndingView } from './views/EndingView';
 import { HistoryView } from './views/HistoryView';
 import { SettingsView } from './views/SettingsView';
-import { AuthView } from './views/AuthView';
-import { ProfileView } from './views/ProfileView';
 
 import {
   AppView,
@@ -48,16 +46,6 @@ import {
   deleteHistoryItem,
   clearAllHistory,
 } from './utils/storage';
-import {
-  User,
-  UserStats,
-  fetchCurrentUserProfile,
-  getUserHistoryFromApi,
-  saveAnalysisToApi,
-  syncLocalStorageHistoryOnce,
-  deleteAnalysisFromApi,
-  clearUserHistoryFromApi,
-} from './services/authService';
 
 export default function App() {
   const [currentView, setCurrentView] = useState<AppView>('landing');
@@ -80,122 +68,40 @@ export default function App() {
   const [coupleSession, setCoupleSession] = useState<CoupleSessionPublicState | null>(null);
   const [coupleAuth, setCoupleAuth] = useState<LocalCoupleSessionAuth | null>(null);
   const [urlJoinCode, setUrlJoinCode] = useState<string>('');
-  const [roomNotFound, setRoomNotFound] = useState<boolean>(false);
-  const [isVerifyingRoom, setIsVerifyingRoom] = useState<boolean>(false);
 
   // Modals & Toasts
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [aboutModalTab, setAboutModalTab] = useState<'how-it-works' | 'about-us' | 'privacy'>('how-it-works');
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
-  // User & Auth state
-  const [user, setUser] = useState<User | null>(null);
-  const [userStats, setUserStats] = useState<UserStats | null>(null);
-
-  // Load history & check user session on initial render
+  // Load history & check URL parameters on initial render
   useEffect(() => {
-    // 1. Initial local history fallback
-    const savedLocal = getHistory();
-    setHistoryItems(savedLocal);
+    const saved = getHistory();
+    setHistoryItems(saved);
 
-    // 2. Fetch authenticated user profile if token exists
-    fetchCurrentUserProfile()
-      .then(async (res) => {
-        if (res.user) {
-          setUser(res.user);
-          setUserStats(res.stats || null);
-          // Sync offline LocalStorage history to database once
-          const dbHistory = await syncLocalStorageHistoryOnce();
-          if (dbHistory) {
-            setHistoryItems(dbHistory);
-          } else {
-            const apiHistory = await getUserHistoryFromApi();
-            if (apiHistory) setHistoryItems(apiHistory);
-          }
-        }
-      })
-      .catch((err) => {
-        console.log('No active auth session:', err);
-      });
-
-    // 3. Check URL for join code or room ID: ?join=CODE or ?code=CODE or ?room=ROOM_ID or /join/CODE or /room/ROOM_ID or /couple/ROOM_ID
+    // 1. Check URL for join code: ?join=CODE or ?code=CODE or /join/CODE
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
-      let code = searchParams.get('join') || searchParams.get('code') || searchParams.get('room') || '';
+      let code = searchParams.get('join') || searchParams.get('code') || '';
 
-      if (!code) {
-        const path = window.location.pathname;
-        if (
-          path.startsWith('/join/') ||
-          path.startsWith('/room/') ||
-          path.startsWith('/couple/')
-        ) {
-          const parts = path.split('/');
-          code = parts[parts.length - 1] || '';
-        }
+      if (!code && window.location.pathname.startsWith('/join/')) {
+        const parts = window.location.pathname.split('/');
+        code = parts[parts.length - 1] || '';
       }
 
       if (code) {
-        const rawCode = code.trim();
-        const upperCode = rawCode.toUpperCase();
-        setUrlJoinCode(upperCode);
-
-        const cachedAuth = getActiveSessionAuth();
-        if (
-          cachedAuth &&
-          cachedAuth.joinCode.toUpperCase() !== upperCode &&
-          cachedAuth.sessionId.toUpperCase() !== upperCode
-        ) {
-          clearActiveSessionAuth();
-          setCoupleAuth(null);
-          setCoupleSession(null);
-        }
-
-        // Verify room against backend storage
-        setIsVerifyingRoom(true);
-        setRoomNotFound(false);
-        getCoupleSessionStatus(rawCode, cachedAuth?.token)
-          .then((verifiedSession) => {
-            setCoupleSession(verifiedSession);
-            setRoomNotFound(false);
-            if (
-              cachedAuth &&
-              (cachedAuth.joinCode.toUpperCase() === upperCode ||
-                cachedAuth.sessionId.toUpperCase() === verifiedSession.id.toUpperCase())
-            ) {
-              setCoupleAuth(cachedAuth);
-              if (cachedAuth.role === 'participantA') {
-                setCurrentView('couple-invite');
-              } else if (verifiedSession.isParticipantBCompleted) {
-                setCurrentView('couple-waiting');
-              } else {
-                setCurrentView('couple-story');
-              }
-            } else {
-              setCurrentView('couple-join');
-            }
-          })
-          .catch((err) => {
-            console.warn('Backend room verification error:', err);
-            setRoomNotFound(true);
-            setCurrentView('couple-join');
-          })
-          .finally(() => {
-            setIsVerifyingRoom(false);
-          });
-
+        setUrlJoinCode(code.toUpperCase());
+        setCurrentView('couple-join');
         return;
       }
 
-      // 4. Check for active couple session in storage if no URL code
+      // 2. Check for active session in storage
       const cachedAuth = getActiveSessionAuth();
       if (cachedAuth) {
         setCoupleAuth(cachedAuth);
-        setIsVerifyingRoom(true);
         getCoupleSessionStatus(cachedAuth.sessionId, cachedAuth.token)
           .then((latestSession) => {
             setCoupleSession(latestSession);
-            setRoomNotFound(false);
             if (cachedAuth.role === 'participantA') {
               setCurrentView('couple-invite');
             } else {
@@ -209,11 +115,6 @@ export default function App() {
           .catch((err) => {
             console.warn('Failed to restore active session:', err);
             clearActiveSessionAuth();
-            setCoupleAuth(null);
-            setCoupleSession(null);
-          })
-          .finally(() => {
-            setIsVerifyingRoom(false);
           });
       }
     }
@@ -293,7 +194,7 @@ export default function App() {
 
       setAnalysisResult(result);
 
-      // Save to localStorage history
+      // Save to localStorage history only upon successful analysis
       const updatedHistory = saveConflictToHistory(
         state.mode,
         state.storyText,
@@ -303,17 +204,6 @@ export default function App() {
         state.gender
       );
       setHistoryItems(updatedHistory);
-
-      // Save to backend database if user is authenticated
-      if (user) {
-        const latestSavedRecord = updatedHistory[0];
-        if (latestSavedRecord) {
-          saveAnalysisToApi(latestSavedRecord).then((apiHistory) => {
-            if (apiHistory) setHistoryItems(apiHistory);
-          });
-        }
-      }
-
       setIsAILoadingDone(true);
     } catch (err: any) {
       console.error('Error during conflict analysis:', err);
@@ -385,21 +275,11 @@ export default function App() {
   const handleDeleteHistoryItem = (id: string) => {
     const updated = deleteHistoryItem(id);
     setHistoryItems(updated);
-    if (user) {
-      deleteAnalysisFromApi(id).then((apiHistory) => {
-        if (apiHistory) setHistoryItems(apiHistory);
-      });
-    }
   };
 
   const handleClearAllHistory = () => {
     clearAllHistory();
     setHistoryItems([]);
-    if (user) {
-      clearUserHistoryFromApi().then(() => {
-        setHistoryItems([]);
-      });
-    }
   };
 
   return (
@@ -407,7 +287,6 @@ export default function App() {
       {/* Global Header */}
       <Header
         currentView={currentView}
-        user={user}
         onNavigate={(view) => {
           setAnalysisError(null);
           setCurrentView(view);
@@ -482,8 +361,6 @@ export default function App() {
                   <AnalysisResultView
                     data={analysisResult}
                     mode={mode}
-                    isGuest={!user}
-                    onNavigateToAuth={() => setCurrentView('auth')}
                     onProceedToResponse={() => setCurrentView('suggested-response')}
                     onProceedToCouple={() => setCurrentView('couple-create')}
                     onReanalyze={() => setCurrentView('input-story')}
@@ -534,18 +411,8 @@ export default function App() {
                 {currentView === 'couple-join' && (
                   <CoupleJoinView
                     initialCode={urlJoinCode}
-                    roomNotFound={roomNotFound}
-                    isVerifyingRoom={isVerifyingRoom}
-                    session={coupleSession}
                     onJoined={handleCoupleJoined}
-                    onBack={() => {
-                      setRoomNotFound(false);
-                      setCurrentView('landing');
-                    }}
-                    onCreateNewRoom={() => {
-                      setRoomNotFound(false);
-                      setCurrentView('couple-create');
-                    }}
+                    onBack={() => setCurrentView('landing')}
                     onNotify={addToast}
                   />
                 )}
@@ -618,8 +485,6 @@ export default function App() {
                 {currentView === 'history' && (
                   <HistoryView
                     historyItems={historyItems}
-                    isGuest={!user}
-                    onNavigateToAuth={() => setCurrentView('auth')}
                     onSelectHistoryItem={handleSelectHistoryItem}
                     onDeleteItem={handleDeleteHistoryItem}
                     onStartNew={() => setCurrentView('input-story')}
@@ -630,53 +495,9 @@ export default function App() {
                 {/* Settings Tab */}
                 {currentView === 'settings' && (
                   <SettingsView
-                    user={user}
-                    stats={userStats}
-                    onNavigateToAuth={() => setCurrentView('auth')}
-                    onNavigateToProfile={() => setCurrentView('profile')}
-                    onLogout={() => {
-                      setUser(null);
-                      setUserStats(null);
-                      setHistoryItems(getHistory());
-                      setCurrentView('landing');
-                    }}
                     onOpenAbout={handleOpenAbout}
                     onClearAllHistory={handleClearAllHistory}
                     onNotify={addToast}
-                  />
-                )}
-
-                {/* Auth View (Login / Register) */}
-                {currentView === 'auth' && (
-                  <AuthView
-                    onSuccess={(loggedInUser, stats) => {
-                      setUser(loggedInUser);
-                      setUserStats(stats || null);
-                      addToast(`خوش آمدید ${loggedInUser.name} عزیز 🤍`, 'success');
-                      // Load user history from API
-                      getUserHistoryFromApi().then((apiHistory) => {
-                        if (apiHistory) setHistoryItems(apiHistory);
-                      });
-                      setCurrentView('profile');
-                    }}
-                    onBack={() => setCurrentView('settings')}
-                  />
-                )}
-
-                {/* User Profile View */}
-                {currentView === 'profile' && user && (
-                  <ProfileView
-                    user={user}
-                    stats={userStats}
-                    onUpdateUser={(updated) => setUser(updated)}
-                    onLogout={() => {
-                      setUser(null);
-                      setUserStats(null);
-                      setHistoryItems(getHistory());
-                      setCurrentView('landing');
-                    }}
-                    onBack={() => setCurrentView('settings')}
-                    addToast={addToast}
                   />
                 )}
               </>
