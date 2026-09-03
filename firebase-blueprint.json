@@ -1,0 +1,20 @@
+{
+  "entities": {
+    "couple_sessions": {
+      "title": "Couple Sessions",
+      "description": "Real-time couple conflict analysis rooms and shared perspectives",
+      "properties": {
+        "id": { "type": "string", "description": "Unique session ID" },
+        "joinCode": { "type": "string", "description": "6-character invite code" },
+        "createdAt": { "type": "number", "description": "Timestamp of creation" },
+        "updatedAt": { "type": "number", "description": "Timestamp of last update" },
+        "expiresAt": { "type": "number", "description": "Timestamp when session expires" },
+        "status": { "type": "string", "description": "Session status" },
+        "participantA": { "type": "object", "description": "Participant A data" },
+        "participantB": { "type": "object", "description": "Participant B data" },
+        "sharedAnalysis": { "type": "object", "description": "Combined AI analysis result" }
+      },
+      "required": ["id", "joinCode", "createdAt", "updatedAt", "expiresAt", "status", "participantA"]
+    }
+  }
+}

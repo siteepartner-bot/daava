@@ -1,6 +1,84 @@
 import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
+import { db } from '../lib/firebase';
+import { doc, getDoc, collection, query, where, getDocs, onSnapshot } from 'firebase/firestore';
 
 const SESSION_STORAGE_KEY = 'aramkon_active_couple_session';
+
+async function getSessionFromFirestoreDirectly(
+  sessionIdOrCode: string,
+  token?: string
+): Promise<CoupleSessionPublicState | null> {
+  try {
+    const cleanId = sessionIdOrCode.trim();
+    const lookupKey = cleanId.toUpperCase();
+
+    // 1. Try document ID directly
+    const docRef = doc(db, 'couple_sessions', cleanId);
+    const docSnap = await getDoc(docRef);
+    let sessionData: any = null;
+
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      if (data?.dataJson) sessionData = JSON.parse(data.dataJson);
+    } else {
+      // 2. Query by joinCode
+      const q = query(collection(db, 'couple_sessions'), where('joinCode', '==', lookupKey));
+      const querySnap = await getDocs(q);
+      if (!querySnap.empty) {
+        const data = querySnap.docs[0].data();
+        if (data?.dataJson) sessionData = JSON.parse(data.dataJson);
+      }
+    }
+
+    if (!sessionData) return null;
+
+    // Sanitize for public state
+    let role: 'participantA' | 'participantB' | undefined;
+    if (token) {
+      if (sessionData.participantA?.token === token) role = 'participantA';
+      else if (sessionData.participantB?.token === token) role = 'participantB';
+    }
+
+    const isACompleted = Boolean(sessionData.participantA?.completed);
+    const isBCompleted = Boolean(sessionData.participantB?.completed);
+    const isReady = isACompleted && isBCompleted;
+
+    return {
+      id: sessionData.id,
+      joinCode: sessionData.joinCode,
+      status: isReady ? 'ready_for_analysis' : sessionData.status,
+      createdAt: sessionData.createdAt,
+      expiresAt: sessionData.expiresAt,
+      participantA: {
+        name: sessionData.participantA.name,
+        completed: isACompleted,
+        completedAt: sessionData.participantA.completedAt,
+      },
+      participantB: sessionData.participantB
+        ? {
+            name: sessionData.participantB.name,
+            completed: isBCompleted,
+            completedAt: sessionData.participantB.completedAt,
+          }
+        : null,
+      isParticipantACompleted: isACompleted,
+      isParticipantBCompleted: isBCompleted,
+      isReadyForAnalysis: isReady,
+      yourRole: role,
+      yourCompleted:
+        role === 'participantA'
+          ? isACompleted
+          : role === 'participantB'
+          ? isBCompleted
+          : false,
+      sharedAnalysis: isReady ? sessionData.sharedAnalysis || null : null,
+      analyzedAt: sessionData.analyzedAt || null,
+    };
+  } catch (err) {
+    console.warn('Direct Firestore fetch error:', err);
+    return null;
+  }
+}
 
 function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
   const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
@@ -199,25 +277,29 @@ export async function getCoupleSessionStatus(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetchWithFallback(`/api/couple/${encodeURIComponent(sessionIdOrCode)}`, {
-    method: 'GET',
-    headers,
-  });
+  try {
+    const response = await fetchWithFallback(`/api/couple/${encodeURIComponent(sessionIdOrCode)}`, {
+      method: 'GET',
+      headers,
+    });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    if (response.status === 410) {
-      throw new Error('این جلسه دیگه فعال نیست 🤍');
+    if (response.ok) {
+      const data = await response.json();
+      if (data.success && data.session) {
+        return data.session;
+      }
     }
-    throw new Error(errData.message || 'خطا در دریافت وضعیت جلسه.');
+  } catch (err: any) {
+    console.warn('API fetch for session status failed, trying Firestore direct:', err);
   }
 
-  const data = await response.json();
-  if (!data.success || !data.session) {
-    throw new Error(data.message || 'جلسه پیدا نشد.');
+  // Fallback directly to Firebase Firestore
+  const directSession = await getSessionFromFirestoreDirectly(sessionIdOrCode, token);
+  if (directSession) {
+    return directSession;
   }
 
-  return data.session;
+  throw new Error('جلسه پیدا نشد یا ارتباط با سرور برقرار نشد 🤍');
 }
 
 /**

@@ -636,6 +636,138 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   const coupleSessions = new Map<string, CoupleSessionServerRecord>();
   const joinCodeToSessionId = new Map<string, string>();
 
+  const DEFAULT_FIREBASE_CONFIG = {
+    projectId: "gen-lang-client-0837212722",
+    databaseId: "ai-studio-af8d8582-44fc-4d43-92f1-7586b79e487a",
+    apiKey: "AIzaSyD77fs7IX3TyH7yM9IWQquoqdAX0unvG-8"
+  };
+
+  function getFirebaseConfig() {
+    return {
+      projectId: process.env.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId,
+      databaseId: process.env.FIREBASE_DATABASE_ID || DEFAULT_FIREBASE_CONFIG.databaseId,
+      apiKey: process.env.FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey
+    };
+  }
+
+  async function getSessionFromStore(idOrCode: string): Promise<CoupleSessionServerRecord | null> {
+    if (!idOrCode) return null;
+    const cfg = getFirebaseConfig();
+    const cleanId = String(idOrCode).trim();
+    const lookupKey = cleanId.toUpperCase();
+
+    const baseUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents`;
+
+    // 1. Try direct doc fetch
+    try {
+      const directUrl = `${baseUrl}/couple_sessions/${encodeURIComponent(cleanId)}?key=${cfg.apiKey}`;
+      const directRes = await fetch(directUrl);
+      if (directRes.ok) {
+        const doc: any = await directRes.json();
+        if (doc?.fields?.dataJson?.stringValue) {
+          const parsed = JSON.parse(doc.fields.dataJson.stringValue);
+          coupleSessions.set(parsed.id, parsed);
+          joinCodeToSessionId.set(parsed.joinCode.toUpperCase(), parsed.id);
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('Server Firestore direct fetch error:', err);
+    }
+
+    // 2. Query by joinCode
+    try {
+      const queryUrl = `${baseUrl}:runQuery?key=${cfg.apiKey}`;
+      const queryBody = {
+        structuredQuery: {
+          from: [{ collectionId: 'couple_sessions' }],
+          where: {
+            fieldFilter: {
+              field: { fieldPath: 'joinCode' },
+              op: 'EQUAL',
+              value: { stringValue: lookupKey }
+            }
+          },
+          limit: 1
+        }
+      };
+
+      const queryRes = await fetch(queryUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(queryBody)
+      });
+
+      if (queryRes.ok) {
+        const results: any = await queryRes.json();
+        for (const resItem of results) {
+          const doc = resItem.document;
+          if (doc?.fields?.dataJson?.stringValue) {
+            const parsed = JSON.parse(doc.fields.dataJson.stringValue);
+            coupleSessions.set(parsed.id, parsed);
+            joinCodeToSessionId.set(parsed.joinCode.toUpperCase(), parsed.id);
+            return parsed;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Server Firestore runQuery error:', err);
+    }
+
+    // 3. Fallback in-memory
+    let session = coupleSessions.get(joinCodeToSessionId.get(lookupKey) || cleanId);
+    if (session) return session;
+    for (const s of coupleSessions.values()) {
+      if (s.joinCode.toUpperCase() === lookupKey || s.id === cleanId) return s;
+    }
+    return null;
+  }
+
+  async function saveSessionToStore(session: CoupleSessionServerRecord): Promise<void> {
+    if (!session || !session.id) return;
+    coupleSessions.set(session.id, session);
+    joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);
+
+    const cfg = getFirebaseConfig();
+    const docUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents/couple_sessions/${encodeURIComponent(session.id)}?key=${cfg.apiKey}`;
+
+    const docBody = {
+      fields: {
+        id: { stringValue: session.id },
+        joinCode: { stringValue: session.joinCode.toUpperCase() },
+        status: { stringValue: session.status || 'waiting' },
+        expiresAt: { integerValue: String(session.expiresAt || 0) },
+        updatedAt: { integerValue: String(session.updatedAt || Date.now()) },
+        dataJson: { stringValue: JSON.stringify(session) }
+      }
+    };
+
+    try {
+      await fetch(docUrl, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(docBody)
+      });
+    } catch (err) {
+      console.warn('Server Firestore save error:', err);
+    }
+  }
+
+  async function deleteSessionFromStore(session: CoupleSessionServerRecord): Promise<void> {
+    if (!session || !session.id) return;
+    coupleSessions.delete(session.id);
+    joinCodeToSessionId.delete(session.joinCode.toUpperCase());
+
+    const cfg = getFirebaseConfig();
+    const docUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents/couple_sessions/${encodeURIComponent(session.id)}?key=${cfg.apiKey}`;
+
+    try {
+      await fetch(docUrl, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Server Firestore delete error:', err);
+    }
+  }
+
   function generateJoinCode(): string {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -711,7 +843,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   }, 30 * 60 * 1000);
 
   // 1. Create Couple Session
-  app.post('/api/couple/create', (req: Request, res: Response): void => {
+  app.post('/api/couple/create', async (req: Request, res: Response): Promise<void> => {
     try {
       const { name, story, category, emotion, gender } = req.body || {};
       const cleanName = (typeof name === 'string' && name.trim()) || 'نفر اول';
@@ -748,8 +880,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         participantB: null,
       };
 
-      coupleSessions.set(sessionId, sessionRecord);
-      joinCodeToSessionId.set(joinCode.toUpperCase(), sessionId);
+      await saveSessionToStore(sessionRecord);
 
       res.json({
         success: true,
@@ -767,7 +898,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 2. Join Couple Session
-  app.post('/api/couple/join', (req: Request, res: Response): void => {
+  app.post('/api/couple/join', async (req: Request, res: Response): Promise<void> => {
     try {
       const { joinCodeOrId, name, existingToken } = req.body || {};
 
@@ -779,20 +910,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = joinCodeOrId.trim().toUpperCase();
-      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
-      let session = coupleSessions.get(sessionId);
-
-      if (!session && lookupKey.length === 6) {
-        // Try finding by joinCode in case map had casing differences
-        for (const s of coupleSessions.values()) {
-          if (s.joinCode.toUpperCase() === lookupKey) {
-            session = s;
-            sessionId = s.id;
-            break;
-          }
-        }
-      }
+      const session = await getSessionFromStore(joinCodeOrId);
 
       if (!session) {
         res.status(404).json({
@@ -847,6 +965,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         };
         session.updatedAt = now;
 
+        await saveSessionToStore(session);
+
         res.json({
           success: true,
           session: sanitizeSessionForPublic(session, 'participantB'),
@@ -860,6 +980,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       if (!session.participantB.completed) {
         if (cleanName && cleanName !== 'همراه') {
           session.participantB.name = cleanName;
+          await saveSessionToStore(session);
         }
         res.json({
           success: true,
@@ -887,7 +1008,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 3. Get Session Status (Polling)
-  app.get('/api/couple/:id', (req: Request, res: Response): void => {
+  app.get('/api/couple/:id', async (req: Request, res: Response): Promise<void> => {
     try {
       const sessionIdOrCode = req.params.id;
       const token =
@@ -895,9 +1016,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           (req.query.token as string) ||
           '').trim();
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = await getSessionFromStore(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({
@@ -939,7 +1058,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 4. Submit Participant Story
-  app.post('/api/couple/:id/submit', (req: Request, res: Response): void => {
+  app.post('/api/couple/:id/submit', async (req: Request, res: Response): Promise<void> => {
     try {
       const sessionIdOrCode = req.params.id;
       const { token, role, name, story, category, emotion, gender } = req.body || {};
@@ -952,9 +1071,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = await getSessionFromStore(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({
@@ -1042,6 +1159,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         session.status = 'participant_b_completed';
       }
 
+      await saveSessionToStore(session);
+
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, targetRole),
@@ -1056,16 +1175,13 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 5. Leave / Delete Couple Session
-  app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
+  app.post('/api/couple/:id/leave', async (req: Request, res: Response): Promise<void> => {
     try {
       const sessionIdOrCode = req.params.id;
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = await getSessionFromStore(sessionIdOrCode);
 
-      const session = coupleSessions.get(sessionId);
       if (session) {
-        joinCodeToSessionId.delete(session.joinCode.toUpperCase());
-        coupleSessions.delete(sessionId);
+        await deleteSessionFromStore(session);
       }
 
       res.json({ success: true, message: 'از جلسه خارج شدید.' });
@@ -1093,9 +1209,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const session = await getSessionFromStore(sessionIdOrCode);
 
       if (!session) {
         res.status(404).json({
@@ -1234,6 +1348,8 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       session.sharedAnalysis = parsedAnalysis;
       session.analyzedAt = Date.now();
       session.updatedAt = Date.now();
+
+      await saveSessionToStore(session);
 
       res.json({
         success: true,

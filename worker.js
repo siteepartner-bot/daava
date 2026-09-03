@@ -16,6 +16,20 @@
 const workerCoupleSessions = new Map();
 const workerJoinCodes = new Map();
 
+const DEFAULT_FIREBASE_CONFIG = {
+  projectId: "gen-lang-client-0837212722",
+  databaseId: "ai-studio-af8d8582-44fc-4d43-92f1-7586b79e487a",
+  apiKey: "AIzaSyD77fs7IX3TyH7yM9IWQquoqdAX0unvG-8"
+};
+
+function getFirebaseConfig(env) {
+  return {
+    projectId: env?.FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId,
+    databaseId: env?.FIREBASE_DATABASE_ID || DEFAULT_FIREBASE_CONFIG.databaseId,
+    apiKey: env?.FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey
+  };
+}
+
 function generateJoinCode() {
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -31,21 +45,74 @@ function generateJoinCode() {
 }
 
 async function getSessionFromStore(idOrCode, env) {
-  const lookupKey = (idOrCode || '').trim().toUpperCase();
-  let sessionId = workerJoinCodes.get(lookupKey) || idOrCode.trim();
+  if (!idOrCode) return null;
+  const cfg = getFirebaseConfig(env);
+  const cleanId = String(idOrCode).trim();
+  const lookupKey = cleanId.toUpperCase();
 
-  // Try in-memory
-  let session = workerCoupleSessions.get(sessionId);
-  if (session) return session;
+  const baseUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents`;
 
-  // Try Cloudflare KV if bound
+  // 1. Try fetching directly by document ID from Firebase Firestore
+  try {
+    const directUrl = `${baseUrl}/couple_sessions/${encodeURIComponent(cleanId)}?key=${cfg.apiKey}`;
+    const directRes = await fetch(directUrl);
+    if (directRes.ok) {
+      const doc = await directRes.json();
+      if (doc?.fields?.dataJson?.stringValue) {
+        const parsed = JSON.parse(doc.fields.dataJson.stringValue);
+        workerCoupleSessions.set(parsed.id, parsed);
+        workerJoinCodes.set(parsed.joinCode.toUpperCase(), parsed.id);
+        return parsed;
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore direct fetch error:', err);
+  }
+
+  // 2. Query by joinCode in Firestore
+  try {
+    const queryUrl = `${baseUrl}:runQuery?key=${cfg.apiKey}`;
+    const queryBody = {
+      structuredQuery: {
+        from: [{ collectionId: 'couple_sessions' }],
+        where: {
+          fieldFilter: {
+            field: { fieldPath: 'joinCode' },
+            op: 'EQUAL',
+            value: { stringValue: lookupKey }
+          }
+        },
+        limit: 1
+      }
+    };
+
+    const queryRes = await fetch(queryUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(queryBody)
+    });
+
+    if (queryRes.ok) {
+      const results = await queryRes.json();
+      for (const resItem of results) {
+        const doc = resItem.document;
+        if (doc?.fields?.dataJson?.stringValue) {
+          const parsed = JSON.parse(doc.fields.dataJson.stringValue);
+          workerCoupleSessions.set(parsed.id, parsed);
+          workerJoinCodes.set(parsed.joinCode.toUpperCase(), parsed.id);
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore runQuery error:', err);
+  }
+
+  // 3. Fallback to Cloudflare KV if bound
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      if (lookupKey.length === 6) {
-        const resolvedId = await kv.get('code:' + lookupKey);
-        if (resolvedId) sessionId = resolvedId;
-      }
+      let sessionId = lookupKey.length === 6 ? await kv.get('code:' + lookupKey) || cleanId : cleanId;
       const raw = await kv.get('session:' + sessionId);
       if (raw) {
         const parsed = JSON.parse(raw);
@@ -58,20 +125,46 @@ async function getSessionFromStore(idOrCode, env) {
     }
   }
 
-  // Linear search fallback in memory
+  // 4. In-memory fallback
+  let session = workerCoupleSessions.get(workerJoinCodes.get(lookupKey) || cleanId);
+  if (session) return session;
   for (const s of workerCoupleSessions.values()) {
-    if (s.joinCode.toUpperCase() === lookupKey || s.id === idOrCode) {
-      return s;
-    }
+    if (s.joinCode.toUpperCase() === lookupKey || s.id === cleanId) return s;
   }
 
   return null;
 }
 
 async function saveSessionToStore(session, env) {
+  if (!session || !session.id) return;
   workerCoupleSessions.set(session.id, session);
   workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
 
+  const cfg = getFirebaseConfig(env);
+  const docUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents/couple_sessions/${encodeURIComponent(session.id)}?key=${cfg.apiKey}`;
+
+  const docBody = {
+    fields: {
+      id: { stringValue: session.id },
+      joinCode: { stringValue: session.joinCode.toUpperCase() },
+      status: { stringValue: session.status || 'waiting' },
+      expiresAt: { integerValue: String(session.expiresAt || 0) },
+      updatedAt: { integerValue: String(session.updatedAt || Date.now()) },
+      dataJson: { stringValue: JSON.stringify(session) }
+    }
+  };
+
+  try {
+    await fetch(docUrl, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(docBody)
+    });
+  } catch (err) {
+    console.warn('Firestore save error:', err);
+  }
+
+  // Also sync to Cloudflare KV if available
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
@@ -87,9 +180,20 @@ async function saveSessionToStore(session, env) {
 }
 
 async function deleteSessionFromStore(session, env) {
-  if (!session) return;
+  if (!session || !session.id) return;
   workerCoupleSessions.delete(session.id);
   workerJoinCodes.delete(session.joinCode.toUpperCase());
+
+  const cfg = getFirebaseConfig(env);
+  const docUrl = `https://firestore.googleapis.com/v1/projects/${cfg.projectId}/databases/${cfg.databaseId}/documents/couple_sessions/${encodeURIComponent(session.id)}?key=${cfg.apiKey}`;
+
+  try {
+    await fetch(docUrl, {
+      method: 'DELETE'
+    });
+  } catch (err) {
+    console.warn('Firestore delete error:', err);
+  }
 
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
