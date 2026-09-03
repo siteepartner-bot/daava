@@ -32,24 +32,29 @@ function generateJoinCode() {
 
 async function getSessionFromStore(idOrCode, env) {
   if (!idOrCode) return null;
-  const lookupKey = idOrCode.trim().toUpperCase();
   const rawId = idOrCode.trim();
+  const lookupKey = rawId.toUpperCase();
 
   let sessionId = workerJoinCodes.get(lookupKey) || rawId;
 
   // 1. Try in-memory
-  let session = workerCoupleSessions.get(sessionId);
+  let session = workerCoupleSessions.get(sessionId) || workerCoupleSessions.get(sessionId.toLowerCase());
+  if (!session) {
+    for (const s of workerCoupleSessions.values()) {
+      if (s.id.toUpperCase() === lookupKey || s.joinCode.toUpperCase() === lookupKey) {
+        session = s;
+        break;
+      }
+    }
+  }
   if (session) return session;
 
   // 2. Try Cloudflare KV if bound
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      if (lookupKey.length === 6 || !sessionId.startsWith('cs_')) {
-        const resolvedId = await kv.get('code:' + lookupKey);
-        if (resolvedId) sessionId = resolvedId;
-      }
-      const raw = await kv.get('session:' + sessionId);
+      const resolvedId = (await kv.get('code:' + lookupKey)) || sessionId;
+      const raw = (await kv.get('session:' + resolvedId)) || (await kv.get('session:' + resolvedId.toLowerCase()));
       if (raw) {
         const parsed = JSON.parse(raw);
         workerCoupleSessions.set(parsed.id, parsed);
@@ -66,8 +71,8 @@ async function getSessionFromStore(idOrCode, env) {
   if (db) {
     try {
       const stmt = await db
-        .prepare('SELECT data FROM couple_sessions WHERE id = ? OR joinCode = ?')
-        .bind(rawId, lookupKey)
+        .prepare('SELECT data FROM couple_sessions WHERE UPPER(id) = ? OR UPPER(joinCode) = ?')
+        .bind(lookupKey, lookupKey)
         .first();
       if (stmt && stmt.data) {
         const parsed = JSON.parse(stmt.data);
@@ -80,19 +85,13 @@ async function getSessionFromStore(idOrCode, env) {
     }
   }
 
-  // 4. Linear search fallback in memory
-  for (const s of workerCoupleSessions.values()) {
-    if (s.joinCode.toUpperCase() === lookupKey || s.id === rawId) {
-      return s;
-    }
-  }
-
   return null;
 }
 
 async function saveSessionToStore(session, env) {
   workerCoupleSessions.set(session.id, session);
   workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
+  workerJoinCodes.set(session.id.toUpperCase(), session.id);
 
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
@@ -101,6 +100,7 @@ async function saveSessionToStore(session, env) {
       await Promise.all([
         kv.put('session:' + session.id, JSON.stringify(session), { expirationTtl: ttl }),
         kv.put('code:' + session.joinCode.toUpperCase(), session.id, { expirationTtl: ttl }),
+        kv.put('code:' + session.id.toUpperCase(), session.id, { expirationTtl: ttl }),
       ]);
     } catch (err) {
       console.warn('KV save error:', err);

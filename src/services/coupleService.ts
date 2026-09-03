@@ -16,9 +16,14 @@ function getApiEndpoints(route: string): { primary: string; fallback: string | n
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
-    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
-      ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
-      : `${cleanUrl}${route}`;
+    const baseWorker = cleanUrl.replace(/\/api\/[a-z-]+$/, '');
+    primaryEndpoint = `${baseWorker}${route}`;
+    fallbackEndpoint = route; // Fallback to current domain relative endpoint
+  } else if (metaEnv?.VITE_WORKER_API_URL) {
+    const cleanUrl = metaEnv.VITE_WORKER_API_URL.trim().replace(/\/+$/, '');
+    const baseWorker = cleanUrl.replace(/\/api\/[a-z-]+$/, '');
+    primaryEndpoint = route;
+    fallbackEndpoint = `${baseWorker}${route}`;
   }
 
   return { primary: primaryEndpoint, fallback: fallbackEndpoint };
@@ -38,10 +43,9 @@ async function fetchWithFallback(
     lastError = err;
   }
 
-  if ((!response || !response.ok) && fallback && fallback !== primary) {
+  if ((!response || !response.ok || response.status === 404) && fallback && fallback !== primary) {
     try {
-      const fallbackUrl = fallback.startsWith('http') ? fallback : fallback;
-      const fbResponse = await fetch(fallbackUrl, options);
+      const fbResponse = await fetch(fallback, options);
       if (fbResponse.ok || !response) {
         return fbResponse;
       }

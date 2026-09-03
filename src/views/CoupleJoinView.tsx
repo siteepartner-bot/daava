@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { HeartHandshake, ArrowLeft, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import { HeartHandshake, ArrowLeft, ArrowRight, ShieldCheck, AlertCircle, Loader2 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
@@ -114,8 +114,18 @@ export const CoupleJoinView: React.FC<CoupleJoinViewProps> = ({
         </p>
       </div>
 
-      {/* Room Not Found Card */}
-      {roomNotFound ? (
+      {/* Loading / Verifying Room Card */}
+      {isVerifyingRoom ? (
+        <Card className="border-purple-200 bg-white p-8 text-center space-y-4 shadow-sm">
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center">
+            <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-gray-800">در حال بررسی اطلاعات جلسه...</h3>
+            <p className="text-xs text-gray-500">لطفاً چند لحظه شکیبا باشید 🤍</p>
+          </div>
+        </Card>
+      ) : roomNotFound ? (
         <Card className="border-rose-200 bg-white p-6 md:p-8 text-center space-y-5">
           <div className="w-12 h-12 mx-auto rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
             <AlertCircle className="w-6 h-6" />

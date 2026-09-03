@@ -136,11 +136,16 @@ export default function App() {
       }
 
       if (code) {
-        const cleanCode = code.trim().toUpperCase();
-        setUrlJoinCode(cleanCode);
+        const rawCode = code.trim();
+        const upperCode = rawCode.toUpperCase();
+        setUrlJoinCode(upperCode);
 
         const cachedAuth = getActiveSessionAuth();
-        if (cachedAuth && cachedAuth.joinCode !== cleanCode && cachedAuth.sessionId !== cleanCode) {
+        if (
+          cachedAuth &&
+          cachedAuth.joinCode.toUpperCase() !== upperCode &&
+          cachedAuth.sessionId.toUpperCase() !== upperCode
+        ) {
           clearActiveSessionAuth();
           setCoupleAuth(null);
           setCoupleSession(null);
@@ -148,11 +153,16 @@ export default function App() {
 
         // Verify room against backend storage
         setIsVerifyingRoom(true);
-        getCoupleSessionStatus(cleanCode, cachedAuth?.token)
+        setRoomNotFound(false);
+        getCoupleSessionStatus(rawCode, cachedAuth?.token)
           .then((verifiedSession) => {
             setCoupleSession(verifiedSession);
             setRoomNotFound(false);
-            if (cachedAuth && (cachedAuth.joinCode === cleanCode || cachedAuth.sessionId === verifiedSession.id)) {
+            if (
+              cachedAuth &&
+              (cachedAuth.joinCode.toUpperCase() === upperCode ||
+                cachedAuth.sessionId.toUpperCase() === verifiedSession.id.toUpperCase())
+            ) {
               setCoupleAuth(cachedAuth);
               if (cachedAuth.role === 'participantA') {
                 setCurrentView('couple-invite');

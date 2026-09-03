@@ -995,12 +995,25 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
 
   function findSessionByIdOrCode(idOrCode: string): CoupleSessionServerRecord | undefined {
     if (!idOrCode) return undefined;
-    const lookupKey = idOrCode.trim().toUpperCase();
-    let sessionId = joinCodeToSessionId.get(lookupKey) || idOrCode.trim();
-    let session = coupleSessions.get(sessionId);
+    const rawKey = idOrCode.trim();
+    const upperKey = rawKey.toUpperCase();
+
+    let sessionId = joinCodeToSessionId.get(upperKey) || rawKey;
+    let session = coupleSessions.get(sessionId) || coupleSessions.get(sessionId.toLowerCase());
 
     if (!session) {
-      session = db.findCoupleSession(idOrCode);
+      for (const s of coupleSessions.values()) {
+        if (s.id.toUpperCase() === upperKey || s.joinCode.toUpperCase() === upperKey) {
+          session = s;
+          coupleSessions.set(s.id, s);
+          joinCodeToSessionId.set(s.joinCode.toUpperCase(), s.id);
+          break;
+        }
+      }
+    }
+
+    if (!session) {
+      session = db.findCoupleSession(rawKey);
       if (session) {
         coupleSessions.set(session.id, session);
         joinCodeToSessionId.set(session.joinCode.toUpperCase(), session.id);

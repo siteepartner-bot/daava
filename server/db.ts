@@ -295,8 +295,11 @@ export const db = {
   // Couple Sessions
   findCoupleSession(idOrCode: string): CoupleSessionServerRecord | undefined {
     if (!idOrCode) return undefined;
-    const lookupKey = idOrCode.trim().toUpperCase();
-    return dbData.coupleSessions.find((s) => s.id === idOrCode || s.joinCode.toUpperCase() === lookupKey);
+    const rawKey = idOrCode.trim();
+    const upperKey = rawKey.toUpperCase();
+    return dbData.coupleSessions.find(
+      (s) => s.id.toUpperCase() === upperKey || s.joinCode.toUpperCase() === upperKey
+    );
   },
 
   saveCoupleSession(session: CoupleSessionServerRecord): CoupleSessionServerRecord {
