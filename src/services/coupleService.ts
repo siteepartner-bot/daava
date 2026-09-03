@@ -224,10 +224,6 @@ export async function createCoupleSession(params: {
     throw new Error(data?.message || 'خطا در ساخت جلسه.');
   }
 
-  if (data.session && data.session.joinCode) {
-    data.session.joinCode = ensureNumeric4Digits(data.session.joinCode);
-  }
-
   const auth: LocalCoupleSessionAuth = {
     sessionId: data.session.id,
     joinCode: data.session.joinCode,
@@ -274,9 +270,6 @@ export async function joinCoupleSession(params: {
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.session) {
-        if (data.session.joinCode) {
-          data.session.joinCode = ensureNumeric4Digits(data.session.joinCode);
-        }
         const auth: LocalCoupleSessionAuth = {
           sessionId: data.session.id,
           joinCode: data.session.joinCode,
