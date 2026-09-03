@@ -248,8 +248,11 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
             <span>کد ۴ رقمی ورود به اتاق</span>
           </div>
 
-          {/* Big Digit Tiles */}
-          <div className="flex items-center justify-center gap-2.5 sm:gap-3.5 my-3 dir-ltr">
+          {/* Big Digit Tiles strictly in LTR order */}
+          <div
+            className="flex items-center justify-center gap-2.5 sm:gap-3.5 my-3"
+            style={{ direction: 'ltr', unicodeBidi: 'bidi-override' }}
+          >
             {codeCharacters.map((char, idx) => (
               <motion.div
                 key={idx}
@@ -257,6 +260,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: idx * 0.08 }}
                 className="w-12 h-16 sm:w-14 sm:h-18 rounded-2xl bg-white/15 border-2 border-white/40 backdrop-blur-md flex items-center justify-center text-3xl sm:text-4xl font-extrabold font-mono text-white shadow-inner select-all"
+                style={{ direction: 'ltr' }}
               >
                 {char}
               </motion.div>
@@ -264,7 +268,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
           </div>
 
           <p className="text-xs sm:text-sm text-purple-100 max-w-sm mx-auto leading-relaxed">
-            کافیه طرف مقابلت وارد «آروم شو» بشه و این کد ۴ رقمی رو بزنه تا مستقیماً بیاد تو اتاق.
+            کافیه طرف مقابلت وارد «آروم شو» بشه و کد <strong style={{ direction: 'ltr', display: 'inline-block' }} className="font-mono text-amber-300 font-extrabold px-1">{session.joinCode}</strong> رو بزنه تا مستقیماً بیاد تو اتاق.
           </p>
 
           {/* Copy Code Quick Action */}
@@ -289,8 +293,11 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
             <Lock className="w-3.5 h-3.5 text-purple-600" />
             <span>یا ارسال لینک مستقیم دعوت</span>
           </span>
-          <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-100">
-            کد: {session.joinCode}
+          <span
+            style={{ direction: 'ltr' }}
+            className="text-xs font-mono font-extrabold text-purple-700 bg-purple-50 px-3 py-1 rounded-full border border-purple-100"
+          >
+            {session.joinCode}
           </span>
         </div>
 

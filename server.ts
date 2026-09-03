@@ -1027,6 +1027,13 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   // Load persisted sessions on boot
   loadSessionsFromDisk();
 
+  const digitMap: Record<string, string> = {
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  };
+
   function parseRoomKey(raw: string): string {
     if (!raw) return '';
     let str = String(raw).trim();
@@ -1037,11 +1044,11 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       const parts = str.split('/join/');
       if (parts[1]) str = parts[1].split(/[/?#]/)[0];
     }
-    return str
-      .replace(/[۰-۹]/g, (d: string) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-      .replace(/[٠-٩]/g, (d: string) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
-      .replace(/[^a-zA-Z0-9_-]/g, '')
-      .toUpperCase();
+    let result = '';
+    for (const ch of str) {
+      result += digitMap[ch] || ch;
+    }
+    return result.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
   }
 
   function generateJoinCode(): string {

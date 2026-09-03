@@ -15,9 +15,13 @@ interface CoupleJoinViewProps {
 
 // Convert Persian/Arabic digits to English digits
 const normalizeDigits = (str: string): string => {
-  return str
-    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString());
+  const digitMap: Record<string, string> = {
+    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  };
+  return str.replace(/[۰-۹٠-٩]/g, (d) => digitMap[d] || d);
 };
 
 // Clean join input (extracts code from URL if full link was pasted)
@@ -180,12 +184,14 @@ export const CoupleJoinView: React.FC<CoupleJoinViewProps> = ({
             <div className="relative">
               <input
                 type="text"
+                inputMode="numeric"
                 value={code}
                 onChange={handleCodeChange}
                 placeholder="مثلاً ۴۸۲۹ یا لینک کامل"
-                maxLength={20}
+                maxLength={100}
                 autoFocus
-                className="w-full p-4 rounded-2xl bg-[#FAF8FC] border border-purple-200 font-mono text-center text-2xl md:text-3xl font-extrabold tracking-widest text-purple-950 focus:outline-none focus:ring-2 focus:ring-[#7E57C2] focus:bg-white transition-all uppercase placeholder:text-slate-300 placeholder:text-base placeholder:tracking-normal"
+                style={{ direction: 'ltr', textAlign: 'center' }}
+                className="w-full p-4 rounded-2xl bg-[#FAF8FC] border-2 border-purple-200 font-mono text-center text-2xl md:text-3xl font-extrabold tracking-widest text-purple-950 focus:outline-none focus:ring-2 focus:ring-[#7E57C2] focus:bg-white transition-all uppercase placeholder:text-slate-300 placeholder:text-base placeholder:tracking-normal"
               />
             </div>
             <span className="text-[11px] text-[#64748B] mt-1.5 block text-center">
