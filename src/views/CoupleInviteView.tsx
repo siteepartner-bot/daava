@@ -15,6 +15,9 @@ import {
   AlertCircle,
   ShieldCheck,
   Edit3,
+  KeyRound,
+  QrCode,
+  Smartphone,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -43,7 +46,8 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
   onLeaveSession,
   onNotify,
 }) => {
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedCode, setCopiedCode] = useState(false);
   const [isPollingLoading, setIsPollingLoading] = useState(false);
   const [isLeaveModalOpen, setIsLeaveModalOpen] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
@@ -90,28 +94,43 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
     };
   }, [fetchLatestStatus]);
 
+  const copyTextToClipboard = async (text: string) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+    }
+  };
+
   const handleCopyLink = async () => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(inviteLink);
-      } else {
-        const textArea = document.createElement('textarea');
-        textArea.value = inviteLink;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-      }
-      setCopied(true);
-      onNotify('لینک کپی شد ✓', 'success');
-      setTimeout(() => setCopied(false), 2500);
+      await copyTextToClipboard(inviteLink);
+      setCopiedLink(true);
+      onNotify('لینک اختصاصی کپی شد ✓', 'success');
+      setTimeout(() => setCopiedLink(false), 2500);
     } catch {
       onNotify('کپی لینک با خطا مواجه شد', 'error');
     }
   };
 
+  const handleCopyCode = async () => {
+    try {
+      await copyTextToClipboard(session.joinCode);
+      setCopiedCode(true);
+      onNotify(`کد ۴ رقمی (${session.joinCode}) کپی شد ✓`, 'success');
+      setTimeout(() => setCopiedCode(false), 2500);
+    } catch {
+      onNotify('کپی کد با خطا مواجه شد', 'error');
+    }
+  };
+
   const handleShare = async () => {
-    const shareText = 'بیا دعوامون رو بدون طرفداری بررسی کنیم 🤍';
+    const shareText = `بیا توی «آروم شو» دعوامون رو بدون طرفداری و در آرامش بررسی کنیم 🤍\nکد اتاق: ${session.joinCode}\nلینک ورود:\n`;
     if (typeof navigator !== 'undefined' && navigator.share) {
       try {
         await navigator.share({
@@ -146,6 +165,9 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
   const isUserCompleted = session.isParticipantACompleted;
   const isPartnerCompleted = session.isParticipantBCompleted;
   const isReady = session.isReadyForAnalysis || (isUserCompleted && isPartnerCompleted);
+
+  // Split join code into individual digits/characters for display
+  const codeCharacters = (session.joinCode || '----').split('');
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 md:py-8 space-y-6">
@@ -193,7 +215,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
           جلسه شما آماده است 🤍
         </h2>
         <p className="text-xs sm:text-sm text-[#64748B] max-w-md mx-auto leading-relaxed">
-          این لینک رو برای طرف مقابلت بفرست تا بدون مشاهده پاسخ شما، دیدگاه خودش رو ثبت کنه.
+          طرف مقابلت می‌تونه با <strong className="text-purple-700 font-bold">کد ۴ رقمی</strong> یا <strong className="text-purple-700 font-bold">لینک اختصاصی</strong> وارد این اتاق بشه.
         </p>
       </div>
 
@@ -210,15 +232,65 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
         </Card>
       )}
 
+      {/* 4-Digit Room Code Featured Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="rounded-3xl bg-gradient-to-br from-[#7E57C2] via-purple-700 to-pink-600 text-white p-6 md:p-7 shadow-lg shadow-purple-200/60 relative overflow-hidden"
+      >
+        {/* Subtle decorative background circles */}
+        <div className="absolute -top-10 -left-10 w-32 h-32 rounded-full bg-white/10 blur-xl pointer-events-none" />
+        <div className="absolute -bottom-10 -right-10 w-32 h-32 rounded-full bg-pink-300/20 blur-xl pointer-events-none" />
+
+        <div className="relative text-center space-y-3.5">
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-xs font-semibold backdrop-blur-xs">
+            <KeyRound className="w-3.5 h-3.5 text-amber-300" />
+            <span>کد ۴ رقمی ورود به اتاق</span>
+          </div>
+
+          {/* Big Digit Tiles */}
+          <div className="flex items-center justify-center gap-2.5 sm:gap-3.5 my-3 dir-ltr">
+            {codeCharacters.map((char, idx) => (
+              <motion.div
+                key={idx}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: idx * 0.08 }}
+                className="w-12 h-16 sm:w-14 sm:h-18 rounded-2xl bg-white/15 border-2 border-white/40 backdrop-blur-md flex items-center justify-center text-3xl sm:text-4xl font-extrabold font-mono text-white shadow-inner select-all"
+              >
+                {char}
+              </motion.div>
+            ))}
+          </div>
+
+          <p className="text-xs sm:text-sm text-purple-100 max-w-sm mx-auto leading-relaxed">
+            کافیه طرف مقابلت وارد «آروم شو» بشه و این کد ۴ رقمی رو بزنه تا مستقیماً بیاد تو اتاق.
+          </p>
+
+          {/* Copy Code Quick Action */}
+          <div className="pt-1 flex items-center justify-center">
+            <Button
+              size="md"
+              variant="secondary"
+              className="bg-white/95 text-purple-900 hover:bg-white border-0 font-bold shadow-xs cursor-pointer"
+              onClick={handleCopyCode}
+              icon={copiedCode ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-purple-700" />}
+            >
+              {copiedCode ? 'کد ۴ رقمی کپی شد ✓' : 'کپی کد ۴ رقمی'}
+            </Button>
+          </div>
+        </div>
+      </motion.div>
+
       {/* Dedicated Invite Link Card */}
       <Card className="border-purple-200 bg-white p-5 md:p-6 space-y-4">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-[#2D2A32] flex items-center gap-1.5">
             <Lock className="w-3.5 h-3.5 text-purple-600" />
-            <span>لینک اختصاصی دعوت</span>
+            <span>یا ارسال لینک مستقیم دعوت</span>
           </span>
           <span className="text-[11px] font-mono font-bold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-100">
-            کد جلسه: {session.joinCode}
+            کد: {session.joinCode}
           </span>
         </div>
 
@@ -227,11 +299,11 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
           <span className="truncate">{inviteLink}</span>
           <Button
             size="sm"
-            variant={copied ? 'success' : 'secondary'}
+            variant={copiedLink ? 'success' : 'secondary'}
             onClick={handleCopyLink}
-            icon={copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            icon={copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
           >
-            {copied ? 'کپی شد ✓' : 'کپی لینک'}
+            {copiedLink ? 'کپی شد ✓' : 'کپی لینک'}
           </Button>
         </div>
 
@@ -243,7 +315,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
             icon={<Share2 className="w-4 h-4" />}
             fullWidth
           >
-            اشتراک‌گذاری با طرف مقابل
+            اشتراک‌گذاری دعوت
           </Button>
           <Button
             variant="soft-pink"
@@ -251,7 +323,7 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
             icon={<Copy className="w-4 h-4 text-purple-800" />}
             fullWidth
           >
-            {copied ? 'لینک کپی شد ✓' : 'کپی مجدد لینک'}
+            {copiedLink ? 'لینک کپی شد ✓' : 'کپی مجدد لینک'}
           </Button>
         </div>
       </Card>

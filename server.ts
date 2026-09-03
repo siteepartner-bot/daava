@@ -994,17 +994,25 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   const joinCodeToSessionId = new Map<string, string>();
 
   function generateJoinCode(): string {
+    // Generate clean 4-digit numeric room code (e.g. 1000 - 9999)
+    for (let attempt = 0; attempt < 1000; attempt++) {
+      const code = Math.floor(1000 + Math.random() * 9000).toString();
+      if (!joinCodeToSessionId.has(code)) {
+        return code;
+      }
+    }
+    // Fallback if 4-digit pool gets dense: 4-char alphanumeric
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-    for (let attempt = 0; attempt < 100; attempt++) {
+    for (let attempt = 0; attempt < 200; attempt++) {
       let code = '';
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 4; i++) {
         code += chars.charAt(Math.floor(Math.random() * chars.length));
       }
       if (!joinCodeToSessionId.has(code)) {
         return code;
       }
     }
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    return Math.random().toString(36).substring(2, 6).toUpperCase();
   }
 
   function generateSecureToken(): string {
@@ -1136,14 +1144,28 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const lookupKey = joinCodeOrId.trim().toUpperCase();
-      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
+      // Convert Persian & Arabic numbers to English digits
+      const normalizedKey = joinCodeOrId
+        .replace(/[۰-۹]/g, (d: string) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+        .replace(/[٠-٩]/g, (d: string) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+        .trim()
+        .toUpperCase();
+
+      let sessionId =
+        joinCodeToSessionId.get(normalizedKey) ||
+        joinCodeToSessionId.get(joinCodeOrId.trim().toUpperCase()) ||
+        joinCodeOrId.trim();
       let session = coupleSessions.get(sessionId);
 
-      if (!session && lookupKey.length === 6) {
-        // Try finding by joinCode in case map had casing differences
+      if (!session) {
+        // Try finding by joinCode in case of direct match or formatting
         for (const s of coupleSessions.values()) {
-          if (s.joinCode.toUpperCase() === lookupKey) {
+          if (
+            s.joinCode.toUpperCase() === normalizedKey ||
+            s.joinCode.toUpperCase() === joinCodeOrId.trim().toUpperCase() ||
+            s.id === normalizedKey ||
+            s.id === joinCodeOrId.trim()
+          ) {
             session = s;
             sessionId = s.id;
             break;
@@ -1154,7 +1176,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       if (!session) {
         res.status(404).json({
           error: 'SESSION_NOT_FOUND',
-          message: 'جلسه‌ای با این کد دعوت پیدا نشد. لطفاً کد را بررسی کنید.',
+          message: 'جلسه‌ای با این کد دعوت پیدا نشد. لطفاً کد ۴ رقمی را بررسی کنید.',
         });
         return;
       }
@@ -1252,9 +1274,32 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           (req.query.token as string) ||
           '').trim();
 
-      const lookupKey = sessionIdOrCode.trim().toUpperCase();
-      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
-      const session = coupleSessions.get(sessionId);
+      const normalizedKey = sessionIdOrCode
+        .replace(/[۰-۹]/g, (d: string) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+        .replace(/[٠-٩]/g, (d: string) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+        .trim()
+        .toUpperCase();
+
+      let sessionId =
+        joinCodeToSessionId.get(normalizedKey) ||
+        joinCodeToSessionId.get(sessionIdOrCode.trim().toUpperCase()) ||
+        sessionIdOrCode.trim();
+      let session = coupleSessions.get(sessionId);
+
+      if (!session) {
+        for (const s of coupleSessions.values()) {
+          if (
+            s.joinCode.toUpperCase() === normalizedKey ||
+            s.joinCode.toUpperCase() === sessionIdOrCode.trim().toUpperCase() ||
+            s.id === normalizedKey ||
+            s.id === sessionIdOrCode.trim()
+          ) {
+            session = s;
+            sessionId = s.id;
+            break;
+          }
+        }
+      }
 
       if (!session) {
         res.status(404).json({

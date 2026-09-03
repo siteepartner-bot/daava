@@ -214,33 +214,47 @@ async function getUserStatsWorker(userId, env) {
 }
 
 function generateJoinCode() {
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    const code = Math.floor(1000 + Math.random() * 9000).toString();
+    if (!workerJoinCodes.has(code)) {
+      return code;
+    }
+  }
   const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     let code = '';
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     if (!workerJoinCodes.has(code)) {
       return code;
     }
   }
-  return Math.random().toString(36).substring(2, 8).toUpperCase();
+  return Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
 async function getSessionFromStore(idOrCode, env) {
-  const lookupKey = (idOrCode || '').trim().toUpperCase();
-  let sessionId = workerJoinCodes.get(lookupKey) || idOrCode.trim();
+  const rawKey = (idOrCode || '').trim();
+  const lookupKey = rawKey
+    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
+    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
+    .toUpperCase();
+
+  let sessionId =
+    workerJoinCodes.get(lookupKey) ||
+    workerJoinCodes.get(rawKey.toUpperCase()) ||
+    rawKey;
 
   // Try in-memory
-  let session = workerCoupleSessions.get(sessionId);
+  let session = workerCoupleSessions.get(sessionId) || workerCoupleSessions.get(lookupKey);
   if (session) return session;
 
   // Try Cloudflare KV if bound
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      if (lookupKey.length === 6) {
-        const resolvedId = await kv.get('code:' + lookupKey);
+      if (lookupKey.length >= 4 && lookupKey.length <= 8) {
+        const resolvedId = (await kv.get('code:' + lookupKey)) || (await kv.get('code:' + rawKey.toUpperCase()));
         if (resolvedId) sessionId = resolvedId;
       }
       const raw = await kv.get('session:' + sessionId);
@@ -257,7 +271,12 @@ async function getSessionFromStore(idOrCode, env) {
 
   // Linear search fallback in memory
   for (const s of workerCoupleSessions.values()) {
-    if (s.joinCode.toUpperCase() === lookupKey || s.id === idOrCode) {
+    if (
+      s.joinCode.toUpperCase() === lookupKey ||
+      s.joinCode.toUpperCase() === rawKey.toUpperCase() ||
+      s.id === lookupKey ||
+      s.id === rawKey
+    ) {
       return s;
     }
   }

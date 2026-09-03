@@ -76,6 +76,21 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
             </button>
           </nav>
 
+          {/* Room Code Quick Join button */}
+          <button
+            onClick={() => onNavigate('couple-join')}
+            className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
+              currentView === 'couple-join'
+                ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
+                : 'bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-900 shadow-2xs'
+            }`}
+            title="ورود با کد ۴ رقمی اتاق"
+          >
+            <span className="text-sm">🔑</span>
+            <span className="hidden sm:inline">ورود با کد اتاق</span>
+            <span className="sm:hidden">کد اتاق</span>
+          </button>
+
           {/* User Account / Login Button */}
           {user ? (
             <button

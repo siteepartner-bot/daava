@@ -491,6 +491,10 @@ export default function App() {
                     onStartAnalysis={handleStartAnalysis}
                     onNavigate={setCurrentView}
                     onOpenAbout={handleOpenAbout}
+                    onJoinWithCode={(code) => {
+                      setUrlJoinCode(code.trim().toUpperCase());
+                      setCurrentView('couple-join');
+                    }}
                   />
                 )}
 
@@ -499,6 +503,7 @@ export default function App() {
                   <SelectModeView
                     onSelectMode={handleModeSelect}
                     onBack={() => setCurrentView('landing')}
+                    onGoToJoinCode={() => setCurrentView('couple-join')}
                   />
                 )}
 

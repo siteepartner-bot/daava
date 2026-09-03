@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Sparkles, Users, Lock, Heart, Shield, ArrowLeft, CheckCircle2, MessageSquareHeart } from 'lucide-react';
+import { Sparkles, Users, Lock, Heart, Shield, ArrowLeft, CheckCircle2, MessageSquareHeart, KeyRound, ArrowRight } from 'lucide-react';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
 import { AppView, AnalysisMode } from '../types';
@@ -9,13 +9,26 @@ interface LandingViewProps {
   onStartAnalysis: (mode: AnalysisMode) => void;
   onNavigate: (view: AppView) => void;
   onOpenAbout: (tab?: 'how-it-works' | 'about-us' | 'privacy') => void;
+  onJoinWithCode?: (code: string) => void;
 }
 
 export const LandingView: React.FC<LandingViewProps> = ({
   onStartAnalysis,
   onNavigate,
   onOpenAbout,
+  onJoinWithCode,
 }) => {
+  const [quickRoomCode, setQuickRoomCode] = useState('');
+
+  const handleQuickJoin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = quickRoomCode.trim();
+    if (onJoinWithCode && clean) {
+      onJoinWithCode(clean);
+    } else {
+      onNavigate('couple-join');
+    }
+  };
   return (
     <div className="space-y-12 md:space-y-16 pb-12">
       {/* Hero Section */}
@@ -73,7 +86,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.4, delay: 0.2 }}
-          className="flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-md mx-auto mb-4"
+          className="flex flex-col sm:flex-row items-center justify-center gap-3.5 max-w-md mx-auto mb-3"
         >
           <Button
             size="lg"
@@ -95,6 +108,46 @@ export const LandingView: React.FC<LandingViewProps> = ({
           >
             تحلیل دونفره
           </Button>
+        </motion.div>
+
+        {/* 4-Digit Room Code Direct Join Box */}
+        <motion.div
+          initial={{ opacity: 0, y: 15 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.4, delay: 0.25 }}
+          className="max-w-md mx-auto my-5 p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-purple-50/95 via-white to-pink-50/70 border-2 border-purple-200/90 shadow-sm"
+        >
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <div className="w-6 h-6 rounded-lg bg-purple-600 text-white flex items-center justify-center text-xs shadow-xs">
+              <KeyRound className="w-3.5 h-3.5" />
+            </div>
+            <h3 className="text-sm sm:text-base font-extrabold text-[#2D2A32]">
+              کد ۴ رقمی اتاق داری؟
+            </h3>
+          </div>
+          <p className="text-xs text-[#64748B] mb-3 text-center">
+            اگر طرف مقابلت برات کد فرستاده، اینجا بزن و مستقیم وارد شو:
+          </p>
+
+          <form onSubmit={handleQuickJoin} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={quickRoomCode}
+              onChange={(e) => setQuickRoomCode(e.target.value)}
+              placeholder="مثلاً ۴۸۲۹ یا کل لینک"
+              maxLength={20}
+              className="flex-1 p-3 rounded-2xl bg-white border border-purple-200 font-mono text-center text-base sm:text-lg font-bold text-purple-950 focus:outline-none focus:ring-2 focus:ring-[#7E57C2] placeholder:text-slate-400 placeholder:font-sans placeholder:text-xs"
+            />
+            <Button
+              type="submit"
+              size="md"
+              variant="primary"
+              className="px-4 shrink-0 font-bold"
+              icon={<ArrowLeft className="w-4 h-4" />}
+            >
+              ورود به اتاق
+            </Button>
+          </form>
         </motion.div>
 
         {/* Privacy Note */}
