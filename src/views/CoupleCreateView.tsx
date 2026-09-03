@@ -101,7 +101,7 @@ export const CoupleCreateView: React.FC<CoupleCreateViewProps> = ({
           className="inline-flex items-center gap-1 text-xs text-purple-700 bg-purple-50 hover:bg-purple-100/80 px-3 py-1.5 rounded-full font-medium transition-colors cursor-pointer"
         >
           <KeyRound className="w-3.5 h-3.5" />
-          <span>کد ۴ رقمی داری؟ ورود به اتاق</span>
+          <span>کد دعوت داری؟ ورود به جلسه</span>
         </button>
       </div>
 

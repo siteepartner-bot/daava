@@ -1,6 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
-import fs from 'fs';
 import { GoogleGenAI, Type } from '@google/genai';
 import dotenv from 'dotenv';
 import { db, hashPassword, UserRecord } from './server/db';
@@ -990,76 +989,22 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
     analyzedAt?: number;
   }
 
-  // In-memory + disk-backed sessions map
+  // In-memory sessions map
   const coupleSessions = new Map<string, CoupleSessionServerRecord>();
   const joinCodeToSessionId = new Map<string, string>();
-  const SESSIONS_FILE = path.join(process.cwd(), '.couple_sessions.json');
-
-  function loadSessionsFromDisk() {
-    try {
-      if (fs.existsSync(SESSIONS_FILE)) {
-        const raw = fs.readFileSync(SESSIONS_FILE, 'utf-8');
-        const data = JSON.parse(raw);
-        if (Array.isArray(data)) {
-          const now = Date.now();
-          for (const s of data) {
-            if (s && s.id && s.joinCode && s.expiresAt > now) {
-              coupleSessions.set(s.id, s);
-              joinCodeToSessionId.set(s.joinCode.toUpperCase(), s.id);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to load couple sessions from disk:', err);
-    }
-  }
-
-  function saveSessionsToDisk() {
-    try {
-      const list = Array.from(coupleSessions.values());
-      fs.writeFileSync(SESSIONS_FILE, JSON.stringify(list, null, 2), 'utf-8');
-    } catch (err) {
-      console.warn('Failed to save couple sessions to disk:', err);
-    }
-  }
-
-  // Load persisted sessions on boot
-  loadSessionsFromDisk();
-
-  const digitMap: Record<string, string> = {
-    '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-    '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-    '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-    '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-  };
-
-  function parseRoomKey(raw: string): string {
-    if (!raw) return '';
-    let str = String(raw).trim();
-    if (str.includes('join=') || str.includes('code=')) {
-      const match = str.match(/[?&](join|code)=([a-zA-Z0-9_-]+)/i);
-      if (match && match[2]) str = match[2];
-    } else if (str.includes('/join/')) {
-      const parts = str.split('/join/');
-      if (parts[1]) str = parts[1].split(/[/?#]/)[0];
-    }
-    let result = '';
-    for (const ch of str) {
-      result += digitMap[ch] || ch;
-    }
-    return result.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
-  }
 
   function generateJoinCode(): string {
-    // STRICTLY generate clean 4-digit numbers: 1000 - 9999
-    for (let attempt = 0; attempt < 5000; attempt++) {
-      const code = Math.floor(1000 + Math.random() * 9000).toString();
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    for (let attempt = 0; attempt < 100; attempt++) {
+      let code = '';
+      for (let i = 0; i < 6; i++) {
+        code += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
       if (!joinCodeToSessionId.has(code)) {
         return code;
       }
     }
-    return Math.floor(1000 + Math.random() * 9000).toString();
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
   }
 
   function generateSecureToken(): string {
@@ -1114,15 +1059,12 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   // Periodic cleanup of expired sessions (every 30 mins)
   setInterval(() => {
     const now = Date.now();
-    let changed = false;
     for (const [id, s] of coupleSessions.entries()) {
       if (s.expiresAt < now) {
         joinCodeToSessionId.delete(s.joinCode);
         coupleSessions.delete(id);
-        changed = true;
       }
     }
-    if (changed) saveSessionsToDisk();
   }, 30 * 60 * 1000);
 
   // 1. Create Couple Session
@@ -1165,7 +1107,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
 
       coupleSessions.set(sessionId, sessionRecord);
       joinCodeToSessionId.set(joinCode.toUpperCase(), sessionId);
-      saveSessionsToDisk();
 
       res.json({
         success: true,
@@ -1195,25 +1136,14 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const normalizedKey = parseRoomKey(joinCodeOrId);
-      const rawKey = joinCodeOrId.trim().toUpperCase();
-
-      let sessionId =
-        joinCodeToSessionId.get(normalizedKey) ||
-        joinCodeToSessionId.get(rawKey) ||
-        joinCodeOrId.trim();
+      const lookupKey = joinCodeOrId.trim().toUpperCase();
+      let sessionId = joinCodeToSessionId.get(lookupKey) || joinCodeOrId.trim();
       let session = coupleSessions.get(sessionId);
 
-      if (!session) {
-        // Linear search fallback across all sessions
+      if (!session && lookupKey.length === 6) {
+        // Try finding by joinCode in case map had casing differences
         for (const s of coupleSessions.values()) {
-          if (
-            s.joinCode.toUpperCase() === normalizedKey ||
-            s.joinCode.toUpperCase() === rawKey ||
-            s.id === normalizedKey ||
-            s.id === rawKey ||
-            s.id === joinCodeOrId.trim()
-          ) {
+          if (s.joinCode.toUpperCase() === lookupKey) {
             session = s;
             sessionId = s.id;
             break;
@@ -1224,7 +1154,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       if (!session) {
         res.status(404).json({
           error: 'SESSION_NOT_FOUND',
-          message: 'جلسه‌ای با این کد ۴ رقمی پیدا نشد. لطفاً کد را بررسی کنید 🤍',
+          message: 'جلسه‌ای با این کد دعوت پیدا نشد. لطفاً کد را بررسی کنید.',
         });
         return;
       }
@@ -1273,7 +1203,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           createdAt: now,
         };
         session.updatedAt = now;
-        saveSessionsToDisk();
 
         res.json({
           success: true,
@@ -1289,7 +1218,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         if (cleanName && cleanName !== 'همراه') {
           session.participantB.name = cleanName;
         }
-        saveSessionsToDisk();
         res.json({
           success: true,
           session: sanitizeSessionForPublic(session, 'participantB'),
@@ -1324,30 +1252,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
           (req.query.token as string) ||
           '').trim();
 
-      const normalizedKey = parseRoomKey(sessionIdOrCode);
-      const rawKey = sessionIdOrCode.trim().toUpperCase();
-
-      let sessionId =
-        joinCodeToSessionId.get(normalizedKey) ||
-        joinCodeToSessionId.get(rawKey) ||
-        sessionIdOrCode.trim();
-      let session = coupleSessions.get(sessionId);
-
-      if (!session) {
-        for (const s of coupleSessions.values()) {
-          if (
-            s.joinCode.toUpperCase() === normalizedKey ||
-            s.joinCode.toUpperCase() === rawKey ||
-            s.id === normalizedKey ||
-            s.id === rawKey ||
-            s.id === sessionIdOrCode.trim()
-          ) {
-            session = s;
-            sessionId = s.id;
-            break;
-          }
-        }
-      }
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({
@@ -1402,26 +1309,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const normalizedKey = parseRoomKey(sessionIdOrCode);
-      const rawKey = sessionIdOrCode.trim().toUpperCase();
-      let sessionId = joinCodeToSessionId.get(normalizedKey) || joinCodeToSessionId.get(rawKey) || sessionIdOrCode.trim();
-      let session = coupleSessions.get(sessionId);
-
-      if (!session) {
-        for (const s of coupleSessions.values()) {
-          if (
-            s.joinCode.toUpperCase() === normalizedKey ||
-            s.joinCode.toUpperCase() === rawKey ||
-            s.id === normalizedKey ||
-            s.id === rawKey ||
-            s.id === sessionIdOrCode.trim()
-          ) {
-            session = s;
-            sessionId = s.id;
-            break;
-          }
-        }
-      }
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({
@@ -1509,8 +1399,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         session.status = 'participant_b_completed';
       }
 
-      saveSessionsToDisk();
-
       res.json({
         success: true,
         session: sanitizeSessionForPublic(session, targetRole),
@@ -1528,14 +1416,13 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
-      const normalizedKey = parseRoomKey(sessionIdOrCode);
-      const sessionId = joinCodeToSessionId.get(normalizedKey) || joinCodeToSessionId.get(sessionIdOrCode.trim().toUpperCase()) || sessionIdOrCode.trim();
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
 
       const session = coupleSessions.get(sessionId);
       if (session) {
         joinCodeToSessionId.delete(session.joinCode.toUpperCase());
         coupleSessions.delete(sessionId);
-        saveSessionsToDisk();
       }
 
       res.json({ success: true, message: 'از جلسه خارج شدید.' });
@@ -1563,26 +1450,9 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
         return;
       }
 
-      const normalizedKey = parseRoomKey(sessionIdOrCode);
-      const rawKey = sessionIdOrCode.trim().toUpperCase();
-      let sessionId = joinCodeToSessionId.get(normalizedKey) || joinCodeToSessionId.get(rawKey) || sessionIdOrCode.trim();
-      let session = coupleSessions.get(sessionId);
-
-      if (!session) {
-        for (const s of coupleSessions.values()) {
-          if (
-            s.joinCode.toUpperCase() === normalizedKey ||
-            s.joinCode.toUpperCase() === rawKey ||
-            s.id === normalizedKey ||
-            s.id === rawKey ||
-            s.id === sessionIdOrCode.trim()
-          ) {
-            session = s;
-            sessionId = s.id;
-            break;
-          }
-        }
-      }
+      const lookupKey = sessionIdOrCode.trim().toUpperCase();
+      const sessionId = joinCodeToSessionId.get(lookupKey) || sessionIdOrCode.trim();
+      const session = coupleSessions.get(sessionId);
 
       if (!session) {
         res.status(404).json({
@@ -1721,7 +1591,6 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
       session.sharedAnalysis = parsedAnalysis;
       session.analyzedAt = Date.now();
       session.updatedAt = Date.now();
-      saveSessionsToDisk();
 
       res.json({
         success: true,

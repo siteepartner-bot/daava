@@ -1,65 +1,9 @@
 import { CoupleSessionPublicState, LocalCoupleSessionAuth } from '../types';
 
 const SESSION_STORAGE_KEY = 'aramkon_active_couple_session';
-const LOCAL_ROOMS_CACHE_KEY = 'aramkon_local_rooms_cache';
-
-export function normalizeRoomCode(input: string): string {
-  if (!input) return '';
-  let str = input.trim();
-  if (str.includes('join=') || str.includes('code=')) {
-    const match = str.match(/[?&](join|code)=([a-zA-Z0-9_-]+)/i);
-    if (match && match[2]) str = match[2];
-  } else if (str.includes('/join/')) {
-    const parts = str.split('/join/');
-    if (parts[1]) str = parts[1].split(/[/?#]/)[0];
-  }
-  return str
-    .replace(/[۰-۹]/g, (d: string) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-    .replace(/[٠-٩]/g, (d: string) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
-    .replace(/[^a-zA-Z0-9_-]/g, '')
-    .toUpperCase();
-}
-
-function saveLocalRoomCache(session: CoupleSessionPublicState, auth?: LocalCoupleSessionAuth) {
-  try {
-    const raw = localStorage.getItem(LOCAL_ROOMS_CACHE_KEY);
-    const rooms = raw ? JSON.parse(raw) : {};
-    rooms[session.id] = { session, auth };
-    if (session.joinCode) {
-      rooms[session.joinCode.toUpperCase()] = { session, auth };
-    }
-    localStorage.setItem(LOCAL_ROOMS_CACHE_KEY, JSON.stringify(rooms));
-  } catch (e) {
-    console.warn('Failed to save local room cache:', e);
-  }
-}
-
-function getLocalRoomCache(codeOrId: string): { session: CoupleSessionPublicState; auth?: LocalCoupleSessionAuth } | null {
-  try {
-    const raw = localStorage.getItem(LOCAL_ROOMS_CACHE_KEY);
-    if (!raw) return null;
-    const rooms = JSON.parse(raw);
-    const key = normalizeRoomCode(codeOrId);
-    return rooms[key] || rooms[codeOrId] || null;
-  } catch {
-    return null;
-  }
-}
-
-export function ensureNumeric4Digits(input: string): string {
-  if (!input) return '1000';
-  const digitsOnly = input.replace(/\D/g, '');
-  if (digitsOnly.length === 4) return digitsOnly;
-  if (digitsOnly.length > 4) return digitsOnly.substring(0, 4);
-  // Hash non-numeric string deterministically into a 4-digit number (1000 - 9999)
-  let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash * 31 + input.charCodeAt(i)) % 9000;
-  }
-  return (1000 + Math.abs(hash)).toString();
-}
 
 function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
+  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
     savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
@@ -68,15 +12,22 @@ function getApiEndpoints(route: string): { primary: string; fallback: string | n
   const metaEnv = (import.meta as any)?.env;
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
-  // Primary endpoint MUST be relative /api/... so it hits our Express backend directly
   let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = null;
+  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
-    fallbackEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
+    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
       ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
       : `${cleanUrl}${route}`;
+    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+  } else if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname.includes('workers.dev') ||
+      window.location.hostname.includes('pages.dev'))
+  ) {
+    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
+    fallbackEndpoint = route;
   }
 
   return { primary: primaryEndpoint, fallback: fallbackEndpoint };
@@ -158,83 +109,30 @@ export async function createCoupleSession(params: {
   token: string;
   role: 'participantA';
 }> {
-  let data: any = null;
-  try {
-    const response = await fetchWithFallback('/api/couple/create', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
+  const response = await fetchWithFallback('/api/couple/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
 
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.message || 'خطا در ایجاد جلسه دونفره 🤍');
-    }
-
-    data = await response.json();
-  } catch (err: any) {
-    // If backend failed, create client-side fallback session
-    console.warn('Backend create failed, creating local fallback room:', err);
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
-    const sId = 'cs_local_' + Math.random().toString(36).substring(2, 10);
-    const token = Math.random().toString(36).substring(2, 15);
-    const now = Date.now();
-    const hasStory = Boolean(params.story && params.story.trim().length >= 20);
-
-    const fallbackSession: CoupleSessionPublicState = {
-      id: sId,
-      joinCode: code,
-      status: hasStory ? 'participant_a_completed' : 'waiting',
-      createdAt: now,
-      expiresAt: now + 24 * 60 * 60 * 1000,
-      participantA: {
-        name: params.name || 'نفر اول',
-        completed: hasStory,
-        completedAt: hasStory ? now : undefined,
-      },
-      participantB: null,
-      isParticipantACompleted: hasStory,
-      isParticipantBCompleted: false,
-      isReadyForAnalysis: false,
-      yourRole: 'participantA',
-      yourCompleted: hasStory,
-      sharedAnalysis: null,
-      analyzedAt: null,
-    };
-
-    const auth: LocalCoupleSessionAuth = {
-      sessionId: sId,
-      joinCode: code,
-      role: 'participantA',
-      token,
-      name: params.name || 'نفر اول',
-    };
-
-    saveActiveSessionAuth(auth);
-    saveLocalRoomCache(fallbackSession, auth);
-
-    return {
-      session: fallbackSession,
-      token,
-      role: 'participantA',
-    };
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'خطا در ایجاد جلسه دونفره 🤍');
   }
 
-  if (!data || !data.success || !data.session) {
-    throw new Error(data?.message || 'خطا در ساخت جلسه.');
+  const data = await response.json();
+  if (!data.success || !data.session) {
+    throw new Error(data.message || 'خطا در ساخت جلسه.');
   }
 
-  const auth: LocalCoupleSessionAuth = {
+  // Cache auth
+  saveActiveSessionAuth({
     sessionId: data.session.id,
     joinCode: data.session.joinCode,
     role: 'participantA',
     token: data.token,
     name: params.name || data.session.participantA.name,
-  };
-
-  // Cache auth & room locally
-  saveActiveSessionAuth(auth);
-  saveLocalRoomCache(data.session, auth);
+  });
 
   return {
     session: data.session,
@@ -255,79 +153,36 @@ export async function joinCoupleSession(params: {
   token: string;
   role: 'participantA' | 'participantB';
 }> {
-  const cleanKey = normalizeRoomCode(params.joinCodeOrId);
+  const response = await fetchWithFallback('/api/couple/join', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
 
-  try {
-    const response = await fetchWithFallback('/api/couple/join', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...params,
-        joinCodeOrId: cleanKey || params.joinCodeOrId,
-      }),
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.success && data.session) {
-        const auth: LocalCoupleSessionAuth = {
-          sessionId: data.session.id,
-          joinCode: data.session.joinCode,
-          role: data.role,
-          token: data.token,
-          name: params.name || (data.role === 'participantA' ? data.session.participantA.name : data.session.participantB?.name || ''),
-        };
-        saveActiveSessionAuth(auth);
-        saveLocalRoomCache(data.session, auth);
-
-        return {
-          session: data.session,
-          token: data.token,
-          role: data.role,
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('Server join fetch failed, checking local cache:', err);
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.message || 'خطا در ورود به جلسه 🤍');
   }
 
-  // Fallback to local room cache if available
-  const cached = getLocalRoomCache(cleanKey || params.joinCodeOrId);
-  if (cached) {
-    const role: 'participantA' | 'participantB' =
-      cached.auth?.token === params.existingToken
-        ? cached.auth.role
-        : 'participantB';
-
-    const token = cached.auth?.token || 'tok_b_' + Math.random().toString(36).substring(2, 10);
-    const updatedSession: CoupleSessionPublicState = {
-      ...cached.session,
-      participantB: cached.session.participantB || {
-        name: params.name || 'همراه',
-        completed: false,
-      },
-      yourRole: role,
-    };
-
-    const auth: LocalCoupleSessionAuth = {
-      sessionId: updatedSession.id,
-      joinCode: updatedSession.joinCode,
-      role,
-      token,
-      name: params.name || 'همراه',
-    };
-
-    saveActiveSessionAuth(auth);
-    saveLocalRoomCache(updatedSession, auth);
-
-    return {
-      session: updatedSession,
-      token,
-      role,
-    };
+  const data = await response.json();
+  if (!data.success || !data.session) {
+    throw new Error(data.message || 'خطا در ورود به جلسه.');
   }
 
-  throw new Error('اتاقی با این کد ۴ رقمی پیدا نشد. لطفاً کد را مجدداً بررسی کنید 🤍');
+  // Cache auth
+  saveActiveSessionAuth({
+    sessionId: data.session.id,
+    joinCode: data.session.joinCode,
+    role: data.role,
+    token: data.token,
+    name: params.name || (data.role === 'participantA' ? data.session.participantA.name : data.session.participantB?.name || ''),
+  });
+
+  return {
+    session: data.session,
+    token: data.token,
+    role: data.role,
+  };
 }
 
 /**

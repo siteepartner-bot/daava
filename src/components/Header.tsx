@@ -33,7 +33,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
             <span className="text-sm">🤍</span>
           </div>
           <span className="text-lg md:text-xl font-bold tracking-tight text-[#2D2A32] group-hover:text-[#7E57C2] transition-colors">
-            آروم شو
+            آرومش کن
           </span>
         </button>
 
@@ -76,21 +76,6 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
             </button>
           </nav>
 
-          {/* Room Code Quick Join button */}
-          <button
-            onClick={() => onNavigate('couple-join')}
-            className={`px-3 py-1.5 rounded-xl border transition-all cursor-pointer flex items-center gap-1.5 text-xs font-bold ${
-              currentView === 'couple-join'
-                ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
-                : 'bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-900 shadow-2xs'
-            }`}
-            title="ورود با کد ۴ رقمی اتاق"
-          >
-            <span className="text-sm">🔑</span>
-            <span className="hidden sm:inline">ورود با کد اتاق</span>
-            <span className="sm:hidden">کد اتاق</span>
-          </button>
-
           {/* User Account / Login Button */}
           {user ? (
             <button
@@ -123,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({ currentView, user, onNavigate, o
           {/* Quick Settings Icon button on Mobile & Tablet */}
           <button
             onClick={() => onNavigate('settings')}
-            title="تنظیمات برنامه"
+            title="تنظیمات ورکر و هوش مصنوعی"
             className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-1 text-xs font-medium md:hidden ${
               currentView === 'settings'
                 ? 'bg-purple-100 border-purple-300 text-purple-800'

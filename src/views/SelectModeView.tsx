@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { User, Users, Sparkles, ArrowRight, ArrowLeft, Check, ShieldCheck, KeyRound } from 'lucide-react';
+import { User, Users, Sparkles, ArrowRight, ArrowLeft, Check, ShieldCheck } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { AnalysisMode } from '../types';
@@ -8,36 +8,19 @@ import { AnalysisMode } from '../types';
 interface SelectModeViewProps {
   onSelectMode: (mode: AnalysisMode) => void;
   onBack: () => void;
-  onGoToJoinCode?: () => void;
 }
 
-export const SelectModeView: React.FC<SelectModeViewProps> = ({
-  onSelectMode,
-  onBack,
-  onGoToJoinCode,
-}) => {
+export const SelectModeView: React.FC<SelectModeViewProps> = ({ onSelectMode, onBack }) => {
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 md:py-10">
       {/* Back button */}
-      <div className="flex items-center justify-between mb-6">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1 text-xs md:text-sm text-[#64748B] hover:text-[#7E57C2] transition-colors cursor-pointer"
-        >
-          <ArrowRight className="w-4 h-4" />
-          <span>بازگشت به صفحه اصلی</span>
-        </button>
-
-        {onGoToJoinCode && (
-          <button
-            onClick={onGoToJoinCode}
-            className="inline-flex items-center gap-1 text-xs text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-3 py-1.5 rounded-full font-bold transition-all shadow-2xs cursor-pointer"
-          >
-            <KeyRound className="w-3.5 h-3.5" />
-            <span>کد ۴ رقمی داری؟ ورود به اتاق</span>
-          </button>
-        )}
-      </div>
+      <button
+        onClick={onBack}
+        className="inline-flex items-center gap-1 text-xs md:text-sm text-[#64748B] hover:text-[#7E57C2] transition-colors mb-6 cursor-pointer"
+      >
+        <ArrowRight className="w-4 h-4" />
+        <span>بازگشت به صفحه اصلی</span>
+      </button>
 
       {/* Header */}
       <div className="text-center mb-8 md:mb-10">
@@ -165,40 +148,6 @@ export const SelectModeView: React.FC<SelectModeViewProps> = ({
           </Card>
         </motion.div>
       </div>
-
-      {/* Couple Room Code Banner */}
-      <motion.div
-        initial={{ opacity: 0, y: 15 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.35 }}
-        className="mt-6 p-5 rounded-3xl bg-gradient-to-r from-purple-50 via-indigo-50/50 to-pink-50 border border-purple-200/90 flex flex-col sm:flex-row items-center justify-between gap-4"
-      >
-        <div className="flex items-center gap-3 text-right">
-          <div className="w-10 h-10 rounded-2xl bg-purple-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-            <KeyRound className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="text-sm font-extrabold text-[#2D2A32]">
-              کد ۴ رقمی از طرف مقابلت دریافت کردی؟
-            </h4>
-            <p className="text-xs text-[#64748B]">
-              برای ورود به اتاقی که قبلاً ساخته شده، کافیست کد را وارد کنی.
-            </p>
-          </div>
-        </div>
-
-        <Button
-          variant="secondary"
-          size="md"
-          className="shrink-0 bg-white hover:bg-purple-50 text-purple-900 border-purple-200 font-bold shadow-2xs cursor-pointer"
-          onClick={() => {
-            if (onGoToJoinCode) onGoToJoinCode();
-          }}
-          icon={<ArrowLeft className="w-4 h-4 text-purple-700" />}
-        >
-          ورود با کد ۴ رقمی
-        </Button>
-      </motion.div>
 
       {/* Trust reassurance */}
       <div className="mt-8 text-center text-xs text-[#64748B] flex items-center justify-center gap-2">

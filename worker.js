@@ -213,116 +213,41 @@ async function getUserStatsWorker(userId, env) {
   };
 }
 
-const MASTER_INDEX_ID = 'ff808181a067127101a068c3c9610563';
-
 function generateJoinCode() {
-  for (let attempt = 0; attempt < 1000; attempt++) {
-    const code = Math.floor(1000 + Math.random() * 9000).toString();
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  for (let attempt = 0; attempt < 100; attempt++) {
+    let code = '';
+    for (let i = 0; i < 6; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
     if (!workerJoinCodes.has(code)) {
       return code;
     }
   }
-  return Math.floor(1000 + Math.random() * 9000).toString();
-}
-
-const digitMapWorker = {
-  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
-  '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
-  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
-  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
-};
-
-function normalizeWorkerCode(raw) {
-  if (!raw) return '';
-  let str = String(raw).trim();
-  if (str.includes('join=') || str.includes('code=')) {
-    const match = str.match(/[?&](join|code)=([a-zA-Z0-9_-]+)/i);
-    if (match && match[2]) str = match[2];
-  } else if (str.includes('/join/')) {
-    const parts = str.split('/join/');
-    if (parts[1]) str = parts[1].split(/[/?#]/)[0];
-  }
-  let converted = '';
-  for (const ch of str) {
-    converted += digitMapWorker[ch] || ch;
-  }
-  return converted.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
-}
-
-async function fetchFromRemoteGlobalStore(key, signal) {
-  if (!key) return null;
-  const cleanKey = normalizeWorkerCode(key);
-  try {
-    const indexRes = await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`, { signal });
-    if (!indexRes.ok) return null;
-    const indexData = await indexRes.json();
-    const rooms = indexData?.data?.rooms || {};
-    const objId = rooms[cleanKey] || rooms[key.toUpperCase()] || rooms[key];
-    if (!objId) return null;
-
-    const roomRes = await fetch(`https://api.restful-api.dev/objects/${objId}`, { signal });
-    if (!roomRes.ok) return null;
-    const roomData = await roomRes.json();
-    const session = roomData?.data?.session || roomData?.data;
-    if (session && session.id && session.joinCode) {
-      // Save to local worker memory
-      workerCoupleSessions.set(session.id, session);
-      workerJoinCodes.set(String(session.joinCode).toUpperCase(), session.id);
-      workerJoinCodes.set(session.id, session.id);
-      return session;
-    }
-  } catch (err) {
-    // Silent catch for remote store lookup errors or timeouts
-  }
-  return null;
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
 async function getSessionFromStore(idOrCode, env) {
-  if (!idOrCode) return null;
-  const rawKey = String(idOrCode).trim();
-  const lookupKey = normalizeWorkerCode(rawKey);
+  const lookupKey = (idOrCode || '').trim().toUpperCase();
+  let sessionId = workerJoinCodes.get(lookupKey) || idOrCode.trim();
 
-  // 1. Check in-memory maps
-  let sessionId =
-    workerJoinCodes.get(lookupKey) ||
-    workerJoinCodes.get(rawKey.toUpperCase()) ||
-    rawKey;
-
-  let session =
-    workerCoupleSessions.get(sessionId) ||
-    workerCoupleSessions.get(lookupKey) ||
-    workerCoupleSessions.get(rawKey) ||
-    workerCoupleSessions.get(rawKey.toUpperCase());
-
+  // Try in-memory
+  let session = workerCoupleSessions.get(sessionId);
   if (session) return session;
 
-  // 2. Linear search in memory
-  for (const s of workerCoupleSessions.values()) {
-    if (
-      s.id === rawKey ||
-      s.id === sessionId ||
-      s.joinCode.toUpperCase() === rawKey.toUpperCase() ||
-      s.joinCode.toUpperCase() === lookupKey
-    ) {
-      return s;
-    }
-  }
-
-  // 3. Try Cloudflare KV if bound
+  // Try Cloudflare KV if bound
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      let resolvedId =
-        (await kv.get('code:' + lookupKey)) ||
-        (await kv.get('code:' + rawKey.toUpperCase()));
-      if (resolvedId) sessionId = resolvedId;
-
+      if (lookupKey.length === 6) {
+        const resolvedId = await kv.get('code:' + lookupKey);
+        if (resolvedId) sessionId = resolvedId;
+      }
       const raw = await kv.get('session:' + sessionId);
       if (raw) {
         const parsed = JSON.parse(raw);
         workerCoupleSessions.set(parsed.id, parsed);
-        workerJoinCodes.set(String(parsed.joinCode).toUpperCase(), parsed.id);
-        workerJoinCodes.set(parsed.id, parsed.id);
+        workerJoinCodes.set(parsed.joinCode.toUpperCase(), parsed.id);
         return parsed;
       }
     } catch (err) {
@@ -330,65 +255,19 @@ async function getSessionFromStore(idOrCode, env) {
     }
   }
 
-  // 4. Remote store lookup with 2.5s timeout
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 2500);
-    const remoteSession = await fetchFromRemoteGlobalStore(lookupKey || rawKey, controller.signal);
-    clearTimeout(timer);
-    if (remoteSession) return remoteSession;
-  } catch (e) {
-    // Ignore timeout
+  // Linear search fallback in memory
+  for (const s of workerCoupleSessions.values()) {
+    if (s.joinCode.toUpperCase() === lookupKey || s.id === idOrCode) {
+      return s;
+    }
   }
 
   return null;
 }
 
-function syncToRemoteStoreAsync(session) {
-  return (async () => {
-    try {
-      const postRes = await fetch('https://api.restful-api.dev/objects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: `aramkon_room_${session.joinCode}`,
-          data: { session },
-        }),
-      });
-      if (postRes.ok) {
-        const createdObj = await postRes.json();
-        const newObjId = createdObj.id;
-
-        const indexRes = await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`);
-        if (indexRes.ok) {
-          const indexData = await indexRes.json();
-          const rooms = indexData?.data?.rooms || {};
-          rooms[String(session.joinCode).toUpperCase()] = newObjId;
-          rooms[session.id] = newObjId;
-
-          await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              name: 'aramkon_master_index',
-              data: { rooms },
-            }),
-          });
-        }
-      }
-    } catch (remoteErr) {
-      console.warn('Failed to sync session to remote global store:', remoteErr);
-    }
-  })();
-}
-
 async function saveSessionToStore(session, env) {
-  if (!session || !session.id || !session.joinCode) return;
-
-  const codeUpper = String(session.joinCode).trim().toUpperCase();
   workerCoupleSessions.set(session.id, session);
-  workerJoinCodes.set(codeUpper, session.id);
-  workerJoinCodes.set(session.id, session.id);
+  workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
 
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
@@ -396,15 +275,12 @@ async function saveSessionToStore(session, env) {
       const ttl = 86400; // 24 hours
       await Promise.all([
         kv.put('session:' + session.id, JSON.stringify(session), { expirationTtl: ttl }),
-        kv.put('code:' + codeUpper, session.id, { expirationTtl: ttl }),
+        kv.put('code:' + session.joinCode.toUpperCase(), session.id, { expirationTtl: ttl }),
       ]);
     } catch (err) {
       console.warn('KV save error:', err);
     }
   }
-
-  // Non-blocking background sync
-  syncToRemoteStoreAsync(session).catch(() => {});
 }
 
 async function deleteSessionFromStore(session, env) {
