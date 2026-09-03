@@ -1254,7 +1254,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 3. Get Session Status (Polling)
-  app.get('/api/couple/:id', (req: Request, res: Response): void => {
+  app.get(['/api/couple/:id', '/api/couple/room/:id', '/api/room/:id'], (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
       const token =
@@ -1304,7 +1304,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 4. Submit Participant Story
-  app.post('/api/couple/:id/submit', (req: Request, res: Response): void => {
+  app.post(['/api/couple/:id/submit', '/api/couple/room/:id/submit', '/api/room/:id/submit'], (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
       const { token, role, name, story, category, emotion, gender } = req.body || {};
@@ -1421,7 +1421,7 @@ ${tone ? `- لطفاً به‌طور ویژه روی تولید مجدد پیا�
   });
 
   // 5. Leave / Delete Couple Session
-  app.post('/api/couple/:id/leave', (req: Request, res: Response): void => {
+  app.post(['/api/couple/:id/leave', '/api/couple/room/:id/leave', '/api/room/:id/leave'], (req: Request, res: Response): void => {
     try {
       const sessionIdOrCode = req.params.id;
       const session = findSessionByIdOrCode(sessionIdOrCode);

@@ -80,6 +80,8 @@ export default function App() {
   const [coupleSession, setCoupleSession] = useState<CoupleSessionPublicState | null>(null);
   const [coupleAuth, setCoupleAuth] = useState<LocalCoupleSessionAuth | null>(null);
   const [urlJoinCode, setUrlJoinCode] = useState<string>('');
+  const [roomNotFound, setRoomNotFound] = useState<boolean>(false);
+  const [isVerifyingRoom, setIsVerifyingRoom] = useState<boolean>(false);
 
   // Modals & Toasts
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
@@ -116,38 +118,74 @@ export default function App() {
         console.log('No active auth session:', err);
       });
 
-    // 3. Check URL for join code: ?join=CODE or ?code=CODE or /join/CODE
+    // 3. Check URL for join code or room ID: ?join=CODE or ?code=CODE or ?room=ROOM_ID or /join/CODE or /room/ROOM_ID or /couple/ROOM_ID
     if (typeof window !== 'undefined') {
       const searchParams = new URLSearchParams(window.location.search);
-      let code = searchParams.get('join') || searchParams.get('code') || '';
+      let code = searchParams.get('join') || searchParams.get('code') || searchParams.get('room') || '';
 
-      if (!code && window.location.pathname.startsWith('/join/')) {
-        const parts = window.location.pathname.split('/');
-        code = parts[parts.length - 1] || '';
+      if (!code) {
+        const path = window.location.pathname;
+        if (
+          path.startsWith('/join/') ||
+          path.startsWith('/room/') ||
+          path.startsWith('/couple/')
+        ) {
+          const parts = path.split('/');
+          code = parts[parts.length - 1] || '';
+        }
       }
 
       if (code) {
-        const cleanCode = code.toUpperCase();
+        const cleanCode = code.trim().toUpperCase();
         setUrlJoinCode(cleanCode);
 
         const cachedAuth = getActiveSessionAuth();
-        if (cachedAuth && cachedAuth.joinCode !== cleanCode) {
+        if (cachedAuth && cachedAuth.joinCode !== cleanCode && cachedAuth.sessionId !== cleanCode) {
           clearActiveSessionAuth();
           setCoupleAuth(null);
           setCoupleSession(null);
         }
 
-        setCurrentView('couple-join');
+        // Verify room against backend storage
+        setIsVerifyingRoom(true);
+        getCoupleSessionStatus(cleanCode, cachedAuth?.token)
+          .then((verifiedSession) => {
+            setCoupleSession(verifiedSession);
+            setRoomNotFound(false);
+            if (cachedAuth && (cachedAuth.joinCode === cleanCode || cachedAuth.sessionId === verifiedSession.id)) {
+              setCoupleAuth(cachedAuth);
+              if (cachedAuth.role === 'participantA') {
+                setCurrentView('couple-invite');
+              } else if (verifiedSession.isParticipantBCompleted) {
+                setCurrentView('couple-waiting');
+              } else {
+                setCurrentView('couple-story');
+              }
+            } else {
+              setCurrentView('couple-join');
+            }
+          })
+          .catch((err) => {
+            console.warn('Backend room verification error:', err);
+            setRoomNotFound(true);
+            setCurrentView('couple-join');
+          })
+          .finally(() => {
+            setIsVerifyingRoom(false);
+          });
+
         return;
       }
 
-      // 4. Check for active couple session in storage
+      // 4. Check for active couple session in storage if no URL code
       const cachedAuth = getActiveSessionAuth();
       if (cachedAuth) {
         setCoupleAuth(cachedAuth);
+        setIsVerifyingRoom(true);
         getCoupleSessionStatus(cachedAuth.sessionId, cachedAuth.token)
           .then((latestSession) => {
             setCoupleSession(latestSession);
+            setRoomNotFound(false);
             if (cachedAuth.role === 'participantA') {
               setCurrentView('couple-invite');
             } else {
@@ -161,6 +199,11 @@ export default function App() {
           .catch((err) => {
             console.warn('Failed to restore active session:', err);
             clearActiveSessionAuth();
+            setCoupleAuth(null);
+            setCoupleSession(null);
+          })
+          .finally(() => {
+            setIsVerifyingRoom(false);
           });
       }
     }
@@ -481,8 +524,18 @@ export default function App() {
                 {currentView === 'couple-join' && (
                   <CoupleJoinView
                     initialCode={urlJoinCode}
+                    roomNotFound={roomNotFound}
+                    isVerifyingRoom={isVerifyingRoom}
+                    session={coupleSession}
                     onJoined={handleCoupleJoined}
-                    onBack={() => setCurrentView('landing')}
+                    onBack={() => {
+                      setRoomNotFound(false);
+                      setCurrentView('landing');
+                    }}
+                    onCreateNewRoom={() => {
+                      setRoomNotFound(false);
+                      setCurrentView('couple-create');
+                    }}
                     onNotify={addToast}
                   />
                 )}

@@ -31,18 +31,21 @@ function generateJoinCode() {
 }
 
 async function getSessionFromStore(idOrCode, env) {
-  const lookupKey = (idOrCode || '').trim().toUpperCase();
-  let sessionId = workerJoinCodes.get(lookupKey) || idOrCode.trim();
+  if (!idOrCode) return null;
+  const lookupKey = idOrCode.trim().toUpperCase();
+  const rawId = idOrCode.trim();
 
-  // Try in-memory
+  let sessionId = workerJoinCodes.get(lookupKey) || rawId;
+
+  // 1. Try in-memory
   let session = workerCoupleSessions.get(sessionId);
   if (session) return session;
 
-  // Try Cloudflare KV if bound
+  // 2. Try Cloudflare KV if bound
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      if (lookupKey.length === 6) {
+      if (lookupKey.length === 6 || !sessionId.startsWith('cs_')) {
         const resolvedId = await kv.get('code:' + lookupKey);
         if (resolvedId) sessionId = resolvedId;
       }
@@ -58,9 +61,28 @@ async function getSessionFromStore(idOrCode, env) {
     }
   }
 
-  // Linear search fallback in memory
+  // 3. Try Cloudflare D1 if bound
+  const db = env?.DB || env?.D1 || env?.ARAMKON_DB;
+  if (db) {
+    try {
+      const stmt = await db
+        .prepare('SELECT data FROM couple_sessions WHERE id = ? OR joinCode = ?')
+        .bind(rawId, lookupKey)
+        .first();
+      if (stmt && stmt.data) {
+        const parsed = JSON.parse(stmt.data);
+        workerCoupleSessions.set(parsed.id, parsed);
+        workerJoinCodes.set(parsed.joinCode.toUpperCase(), parsed.id);
+        return parsed;
+      }
+    } catch (err) {
+      console.warn('D1 read error:', err);
+    }
+  }
+
+  // 4. Linear search fallback in memory
   for (const s of workerCoupleSessions.values()) {
-    if (s.joinCode.toUpperCase() === lookupKey || s.id === idOrCode) {
+    if (s.joinCode.toUpperCase() === lookupKey || s.id === rawId) {
       return s;
     }
   }
@@ -75,13 +97,35 @@ async function saveSessionToStore(session, env) {
   const kv = env?.COUPLE_KV || env?.ARAMKON_KV || env?.KV;
   if (kv) {
     try {
-      const ttl = 86400; // 24 hours
+      const ttl = 86400 * 3; // 3 days
       await Promise.all([
         kv.put('session:' + session.id, JSON.stringify(session), { expirationTtl: ttl }),
         kv.put('code:' + session.joinCode.toUpperCase(), session.id, { expirationTtl: ttl }),
       ]);
     } catch (err) {
       console.warn('KV save error:', err);
+    }
+  }
+
+  const db = env?.DB || env?.D1 || env?.ARAMKON_DB;
+  if (db) {
+    try {
+      await db.prepare(`
+        CREATE TABLE IF NOT EXISTS couple_sessions (
+          id TEXT PRIMARY KEY,
+          joinCode TEXT UNIQUE,
+          data TEXT,
+          updatedAt INTEGER
+        )
+      `).run().catch(() => {});
+
+      await db.prepare(`
+        INSERT INTO couple_sessions (id, joinCode, data, updatedAt)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt
+      `).bind(session.id, session.joinCode.toUpperCase(), JSON.stringify(session), Date.now()).run();
+    } catch (err) {
+      console.warn('D1 save error:', err);
     }
   }
 }
@@ -100,6 +144,15 @@ async function deleteSessionFromStore(session, env) {
       ]);
     } catch (err) {
       console.warn('KV delete error:', err);
+    }
+  }
+
+  const db = env?.DB || env?.D1 || env?.ARAMKON_DB;
+  if (db) {
+    try {
+      await db.prepare('DELETE FROM couple_sessions WHERE id = ? OR joinCode = ?').bind(session.id, session.joinCode.toUpperCase()).run();
+    } catch (err) {
+      console.warn('D1 delete error:', err);
     }
   }
 }
@@ -171,8 +224,17 @@ export default {
       );
     }
 
-    // Couple Session: GET /api/couple/:id or /couple/:id
-    if (request.method === 'GET' && (normalizedPath.startsWith('/api/couple/') || normalizedPath.startsWith('/couple/'))) {
+    // Couple Session: GET /api/couple/:id, /room/:id, /join/:code, etc.
+    const isCoupleGetRoute = request.method === 'GET' && (
+      normalizedPath.startsWith('/api/couple/') ||
+      normalizedPath.startsWith('/couple/') ||
+      normalizedPath.startsWith('/api/room/') ||
+      normalizedPath.startsWith('/room/') ||
+      normalizedPath.startsWith('/api/join/') ||
+      normalizedPath.startsWith('/join/')
+    );
+
+    if (isCoupleGetRoute) {
       const parts = normalizedPath.split('/');
       const sessionIdOrCode = parts[parts.length - 1];
       const authHeader = request.headers.get('Authorization') || '';
