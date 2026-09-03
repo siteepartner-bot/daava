@@ -213,6 +213,8 @@ async function getUserStatsWorker(userId, env) {
   };
 }
 
+const MASTER_INDEX_ID = 'ff808181a067127101a068c3c9610563';
+
 function generateJoinCode() {
   for (let attempt = 0; attempt < 1000; attempt++) {
     const code = Math.floor(1000 + Math.random() * 9000).toString();
@@ -220,25 +222,63 @@ function generateJoinCode() {
       return code;
     }
   }
-  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
-  for (let attempt = 0; attempt < 200; attempt++) {
-    let code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    if (!workerJoinCodes.has(code)) {
-      return code;
-    }
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+const digitMapWorker = {
+  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4',
+  '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9',
+  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4',
+  '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+};
+
+function normalizeWorkerCode(raw) {
+  if (!raw) return '';
+  let str = String(raw).trim();
+  if (str.includes('join=') || str.includes('code=')) {
+    const match = str.match(/[?&](join|code)=([a-zA-Z0-9_-]+)/i);
+    if (match && match[2]) str = match[2];
+  } else if (str.includes('/join/')) {
+    const parts = str.split('/join/');
+    if (parts[1]) str = parts[1].split(/[/?#]/)[0];
   }
-  return Math.random().toString(36).substring(2, 6).toUpperCase();
+  let converted = '';
+  for (const ch of str) {
+    converted += digitMapWorker[ch] || ch;
+  }
+  return converted.replace(/[^a-zA-Z0-9_-]/g, '').toUpperCase();
+}
+
+async function fetchFromRemoteGlobalStore(key) {
+  if (!key) return null;
+  const cleanKey = normalizeWorkerCode(key);
+  try {
+    const indexRes = await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`);
+    if (!indexRes.ok) return null;
+    const indexData = await indexRes.json();
+    const rooms = indexData?.data?.rooms || {};
+    const objId = rooms[cleanKey] || rooms[key.toUpperCase()] || rooms[key];
+    if (!objId) return null;
+
+    const roomRes = await fetch(`https://api.restful-api.dev/objects/${objId}`);
+    if (!roomRes.ok) return null;
+    const roomData = await roomRes.json();
+    const session = roomData?.data?.session || roomData?.data;
+    if (session && session.id && session.joinCode) {
+      // Save to local worker memory
+      workerCoupleSessions.set(session.id, session);
+      workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
+      return session;
+    }
+  } catch (err) {
+    console.warn('Failed to fetch session from remote global store:', err);
+  }
+  return null;
 }
 
 async function getSessionFromStore(idOrCode, env) {
   const rawKey = (idOrCode || '').trim();
-  const lookupKey = rawKey
-    .replace(/[۰-۹]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d).toString())
-    .replace(/[٠-٩]/g, (d) => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString())
-    .toUpperCase();
+  const lookupKey = normalizeWorkerCode(rawKey);
 
   let sessionId =
     workerJoinCodes.get(lookupKey) ||
@@ -281,10 +321,22 @@ async function getSessionFromStore(idOrCode, env) {
     }
   }
 
+  // Fallback to global HTTP store
+  const remoteSession = await fetchFromRemoteGlobalStore(lookupKey || rawKey);
+  if (remoteSession) return remoteSession;
+
   return null;
 }
 
 async function saveSessionToStore(session, env) {
+  if (!session || !session.id || !session.joinCode) return;
+  
+  // Ensure joinCode is strictly 4 digits
+  const cleanCode = normalizeWorkerCode(session.joinCode);
+  if (cleanCode.length === 4 && /^\d{4}$/.test(cleanCode)) {
+    session.joinCode = cleanCode;
+  }
+
   workerCoupleSessions.set(session.id, session);
   workerJoinCodes.set(session.joinCode.toUpperCase(), session.id);
 
@@ -299,6 +351,42 @@ async function saveSessionToStore(session, env) {
     } catch (err) {
       console.warn('KV save error:', err);
     }
+  }
+
+  // Sync to global HTTP remote store asynchronously
+  try {
+    const postRes = await fetch('https://api.restful-api.dev/objects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: `aramkon_room_${session.joinCode}`,
+        data: { session },
+      }),
+    });
+    if (postRes.ok) {
+      const createdObj = await postRes.json();
+      const newObjId = createdObj.id;
+
+      // Update master index
+      const indexRes = await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`);
+      if (indexRes.ok) {
+        const indexData = await indexRes.json();
+        const rooms = indexData?.data?.rooms || {};
+        rooms[session.joinCode.toUpperCase()] = newObjId;
+        rooms[session.id] = newObjId;
+
+        await fetch(`https://api.restful-api.dev/objects/${MASTER_INDEX_ID}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'aramkon_master_index',
+            data: { rooms },
+          }),
+        });
+      }
+    }
+  } catch (remoteErr) {
+    console.warn('Failed to sync session to remote global store:', remoteErr);
   }
 }
 
