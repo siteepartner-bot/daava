@@ -94,6 +94,21 @@ export const CoupleInviteView: React.FC<CoupleInviteViewProps> = ({
     };
   }, [fetchLatestStatus]);
 
+  // Sync browser URL bar with room join code so address bar shows room link directly
+  useEffect(() => {
+    if (typeof window !== 'undefined' && session.joinCode) {
+      try {
+        const url = new URL(window.location.href);
+        if (url.searchParams.get('join') !== session.joinCode) {
+          url.searchParams.set('join', session.joinCode);
+          window.history.replaceState({}, '', url.toString());
+        }
+      } catch (e) {
+        console.warn('Failed to update URL search params:', e);
+      }
+    }
+  }, [session.joinCode]);
+
   const copyTextToClipboard = async (text: string) => {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       await navigator.clipboard.writeText(text);

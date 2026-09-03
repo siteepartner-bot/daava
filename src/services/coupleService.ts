@@ -46,8 +46,20 @@ function getLocalRoomCache(codeOrId: string): { session: CoupleSessionPublicStat
   }
 }
 
+export function ensureNumeric4Digits(input: string): string {
+  if (!input) return '1000';
+  const digitsOnly = input.replace(/\D/g, '');
+  if (digitsOnly.length === 4) return digitsOnly;
+  if (digitsOnly.length > 4) return digitsOnly.substring(0, 4);
+  // Hash non-numeric string deterministically into a 4-digit number (1000 - 9999)
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) % 9000;
+  }
+  return (1000 + Math.abs(hash)).toString();
+}
+
 function getApiEndpoints(route: string): { primary: string; fallback: string | null } {
-  const CLOUDFLARE_WORKER_URL = 'https://frosty-tree-3857.sitee-partner.workers.dev';
   let savedWorkerUrl = '';
   if (typeof window !== 'undefined') {
     savedWorkerUrl = localStorage.getItem('custom_worker_api_url') || '';
@@ -56,22 +68,15 @@ function getApiEndpoints(route: string): { primary: string; fallback: string | n
   const metaEnv = (import.meta as any)?.env;
   const configuredWorker = savedWorkerUrl || metaEnv?.VITE_WORKER_API_URL;
 
+  // Primary endpoint MUST be relative /api/... so it hits our Express backend directly
   let primaryEndpoint = route;
-  let fallbackEndpoint: string | null = CLOUDFLARE_WORKER_URL;
+  let fallbackEndpoint: string | null = null;
 
   if (configuredWorker) {
     const cleanUrl = configuredWorker.trim().replace(/\/+$/, '');
-    primaryEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
+    fallbackEndpoint = cleanUrl.endsWith('/api/analyze') || cleanUrl.endsWith('/api/suggest-replies') || cleanUrl.endsWith('/api/rewrite-reply')
       ? cleanUrl.replace(/\/api\/[a-z-]+$/, route)
       : `${cleanUrl}${route}`;
-    fallbackEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-  } else if (
-    typeof window !== 'undefined' &&
-    (window.location.hostname.includes('workers.dev') ||
-      window.location.hostname.includes('pages.dev'))
-  ) {
-    primaryEndpoint = `${CLOUDFLARE_WORKER_URL}${route}`;
-    fallbackEndpoint = route;
   }
 
   return { primary: primaryEndpoint, fallback: fallbackEndpoint };
@@ -219,6 +224,10 @@ export async function createCoupleSession(params: {
     throw new Error(data?.message || 'خطا در ساخت جلسه.');
   }
 
+  if (data.session && data.session.joinCode) {
+    data.session.joinCode = ensureNumeric4Digits(data.session.joinCode);
+  }
+
   const auth: LocalCoupleSessionAuth = {
     sessionId: data.session.id,
     joinCode: data.session.joinCode,
@@ -265,6 +274,9 @@ export async function joinCoupleSession(params: {
     if (response.ok) {
       const data = await response.json();
       if (data.success && data.session) {
+        if (data.session.joinCode) {
+          data.session.joinCode = ensureNumeric4Digits(data.session.joinCode);
+        }
         const auth: LocalCoupleSessionAuth = {
           sessionId: data.session.id,
           joinCode: data.session.joinCode,
